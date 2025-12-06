@@ -1,0 +1,122 @@
+.chat-input-container {
+  background-color: transparent;
+}
+
+.chat-input-wrapper {
+  max-width: 760px;
+  margin: 0 auto;
+  padding-top: 0.25rem;
+}
+
+.input-box {
+  position: relative;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 0.15rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.input-box:focus-within {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.08);
+  background: #ffffff;
+}
+
+.input-textarea {
+  width: 100%;
+  resize: none;
+  border: none;
+  background: transparent;
+  padding: 0.9rem 3.5rem 0.9rem 1.05rem;
+  font-size: 1rem;
+  color: #0f172a;
+  line-height: 1.5;
+  max-height: 12rem;
+}
+
+.input-textarea:focus {
+  outline: none;
+}
+
+.input-textarea:disabled {
+  color: #94a3b8;
+}
+
+.input-textarea::placeholder {
+  color: #94a3b8;
+}
+
+.send-button {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.6rem;
+  background: #0ea5e9;
+  color: #ffffff;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  box-shadow: 0 10px 25px rgba(14, 165, 233, 0.35);
+}
+
+.send-button:hover:not(:disabled) {
+  background: #0284c7;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(14, 165, 233, 0.45);
+}
+
+.send-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.send-button:disabled {
+  background: #cbd5e1;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.send-button svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  display: block;
+}
+
+.input-hint {
+  text-align: center;
+  margin-top: 0.65rem;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.loading-indicator-wrapper {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.loading-bubble {
+  background-color: white;
+  color: #1e293b;
+  border-radius: 1rem;
+  padding: 0.75rem 1.25rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  border: 1px solid #e2e8f0;
+}
+
+.loading-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
