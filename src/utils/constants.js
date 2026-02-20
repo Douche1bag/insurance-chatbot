@@ -13,7 +13,7 @@ export const SYSTEM_MESSAGE = {
 
 export const WELCOME_MESSAGE = {
   role: 'assistant',
-  content: 'สวัสดีครับ! ผม คือผู้ช่วยสรุปกรมธรรม์ประกันภัย คุณสามารถวางข้อความกรมธรรม์ของคุณได้เลยครับ'
+  content: 'สวัสดีครับ! คุณสามารถวางข้อความกรมธรรม์ของคุณได้เลยครับ'
 };
 
 export const ERROR_MESSAGE = {
@@ -26,3 +26,5 @@ export const MESSAGES = {
   PLACEHOLDER: 'วางข้อความกรมธรรม์ของคุณที่นี่...',
   HINT: 'กด Enter เพื่อส่งข้อความ • Shift + Enter เพื่อขึ้นบรรทัดใหม่'
 };
+
+export const APP_NAME = "InsureWise AI";
