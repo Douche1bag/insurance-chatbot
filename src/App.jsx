@@ -1,78 +1,65 @@
-import React, { useState, useRef, useEffect } from 'react';
-import ChatHeader from './components/ChatHeader';
-import ChatMessage from './components/ChatMessage';
-import ChatInput from './components/ChatInput';
-import LoadingIndicator from './components/LoadingIndicator';
-import { APIService } from './services/apiService';
-import { WELCOME_MESSAGE, ERROR_MESSAGE } from './utils/constants';
+import React, { useState } from 'react';
+import MainLayout from './layout/MainLayout';
+import LoginPage from './Pages/LoginPage';
+import DashboardPage from './Pages/DashboardPage';
+import UploadPage from './Pages/UploadPage';
+import ChatPage from './Pages/ChatPage';
+import ComparisonPage from './Pages/ComparisonPage';
+import AdminPage from './Pages/AdminPage';
+import { LayoutDashboard, Upload, MessageSquare, BarChart3, Users, LogOut } from 'lucide-react';
 import './Styles/App.css';
 
 export default function App() {
-  const [messages, setMessages] = useState([WELCOME_MESSAGE]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef(null);
+  const [currentPage, setCurrentPage] = useState('chat');
+  const [isLoggedIn, setIsLoggedIn] = useState(true);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  if (!isLoggedIn) {
+    return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
+  }
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
+  const menuItems = [
+    { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, active: currentPage === 'dashboard' },
+    { key: 'upload', label: 'Upload', icon: Upload, active: currentPage === 'upload' },
+    { key: 'chat', label: 'AI Chat', icon: MessageSquare, active: currentPage === 'chat' },
+    { key: 'compare', label: 'Compare', icon: BarChart3, active: currentPage === 'compare' },
+    { key: 'admin', label: 'Admin', icon: Users, active: currentPage === 'admin' },
+    { key: 'logout', label: 'Logout', icon: LogOut, active: false },
+  ];
 
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-
-    const userMessage = { role: 'user', content: input };
-    const conversationMessages = [...messages, userMessage].filter(
-      m => m.content !== WELCOME_MESSAGE.content
-    );
-
-    setMessages(prev => [...prev, userMessage]);
-    setInput('');
-    setIsLoading(true);
-
-    const result = await APIService.sendMessage(conversationMessages);
-
-    if (result?.success) {
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: result.message
-      }]);
+  const handleMenuClick = (key) => {
+    if (key === 'logout') {
+      setIsLoggedIn(false);
+      setCurrentPage('dashboard');
     } else {
-      setMessages(prev => [...prev, ERROR_MESSAGE]);
+      setCurrentPage(key);
     }
-
-    setIsLoading(false);
   };
+
+  let page = null;
+  switch (currentPage) {
+    case 'dashboard':
+      page = <DashboardPage />;
+      break;
+    case 'upload':
+      page = <UploadPage />;
+      break;
+    case 'chat':
+      page = <ChatPage />;
+      break;
+    case 'compare':
+      page = <ComparisonPage />;
+      break;
+    case 'admin':
+      page = <AdminPage />;
+      break;
+    default:
+      page = <DashboardPage />;
+  }
 
   return (
-    <div className="app-root">
-      <div className="chat-shell">
-        <ChatHeader />
-
-        <main className="chat-window">
-          <div className="messages-stack">
-            {messages.map((message, index) => (
-              <ChatMessage key={index} message={message} />
-            ))}
-
-            {isLoading && <LoadingIndicator />}
-            <div ref={messagesEndRef} />
-          </div>
-        </main>
-
-        <footer className="chat-input-area">
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSend={handleSend}
-            disabled={isLoading}
-          />
-        </footer>
-      </div>
-    </div>
+    <MainLayout menu={menuItems} onMenuClick={handleMenuClick}>
+      {page}
+    </MainLayout>
   );
 }
   
