@@ -10,8 +10,8 @@ import { LayoutDashboard, Upload, MessageSquare, BarChart3, Users, LogOut } from
 import './Styles/App.css';
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('dashboard');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentPage, setCurrentPage] = useState('chat');
+  const [isLoggedIn, setIsLoggedIn] = useState(true);
 
   if (!isLoggedIn) {
     return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
