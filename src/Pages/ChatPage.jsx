@@ -1,7 +1,6 @@
 // src/Pages/ChatPage.jsx
 import React, { useState } from 'react';
 import { APIService } from '../services/apiService';
-import { ERROR_MESSAGE } from '../utils/constants';
 import '../Styles/App.css';
 
 export default function ChatPage() {
@@ -18,8 +17,9 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
+      // Simple API call for now (RAG will be re-implemented later)
       const messagesForAPI = [
-        { role: 'system', content: 'You are a helpful Thai insurance assistant.' },
+        { role: 'system', content: 'คุณเป็นผู้ช่วยด้านประกันภัยไทยที่มีความเชี่ยวชาญ กรุณาตอบคำถามเป็นภาษาไทย' },
         { role: 'user', content: userMessage }
       ];
 
@@ -28,11 +28,11 @@ export default function ChatPage() {
       if (response.success) {
         setMessages(prev => [...prev, { role: 'assistant', content: response.message }]);
       } else {
-        setMessages(prev => [...prev, ERROR_MESSAGE]);
+        setMessages(prev => [...prev, { role: 'assistant', content: 'ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง' }]);
       }
     } catch (error) {
       console.error('Error in chat:', error);
-      setMessages(prev => [...prev, ERROR_MESSAGE]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง' }]);
     } finally {
       setLoading(false);
     }

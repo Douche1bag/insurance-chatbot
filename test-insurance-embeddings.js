@@ -1,21 +1,22 @@
-// Test MongoDB by storing the Thai insurance embedding data
+// Import Thai insurance embedding data to MongoDB
 import dotenv from 'dotenv';
-import { readFile } from 'fs/promises';
+import { readFile, readdir } from 'fs/promises';
+import { join } from 'path';
 import mongoService from './src/services/mongoService.js';
 
 dotenv.config();
 
-async function testWithInsuranceEmbeddings() {
-  console.log('🧪 Testing MongoDB with Thai Insurance Embeddings...\n');
+async function importInsuranceEmbeddings() {
+  console.log('📁 Importing Thai Insurance Embeddings to MongoDB...\n');
 
   try {
-    // Load the embedding file
-    console.log('📁 Loading insurance embedding data...');
-    const filePath = './src/services/emb_กรมธรรมประกันชีวิต1.json';
-    const fileContent = await readFile(filePath, 'utf-8');
-    const insuranceData = JSON.parse(fileContent);
+    // Read all JSON files from embeded_dataset folder
+    console.log('📂 Reading embedding files from embeded_dataset folder...');
+    const datasetPath = '/Users/aum/Downloads/embeded_dataset';
+    const files = await readdir(datasetPath);
+    const jsonFiles = files.filter(file => file.endsWith('.json'));
     
-    console.log(`✅ Loaded ${insuranceData.length} insurance documents\n`);
+    console.log(`✅ Found ${jsonFiles.length} JSON files to process\n`);
 
     // Connect to MongoDB
     console.log('🔗 Connecting to MongoDB Atlas...');
@@ -27,182 +28,101 @@ async function testWithInsuranceEmbeddings() {
     await mongoService.createIndexes();
     console.log('✅ Indexes created!\n');
 
-    // Store documents in batches for better performance
-    console.log('💾 Storing insurance documents with embeddings...');
-    const batchSize = 50;
-    let stored = 0;
+    let totalDocuments = 0;
+    let totalStored = 0;
 
-    for (let i = 0; i < insuranceData.length; i += batchSize) {
-      const batch = insuranceData.slice(i, i + batchSize);
-      const promises = batch.map(async (doc, index) => {
-        try {
-          // Prepare document for storage
-          const document = {
-            title: `Insurance Document - ${doc.file} (Page ${doc.page})`,
-            content: doc.text,
-            embedding: doc.embedding,
-            metadata: {
-              originalFile: doc.file,
-              pageNumber: doc.page,
-              language: 'thai',
-              documentType: 'insurance_policy',
-              source: 'กรมธรรมประกันชีวิต',
-              embeddingDimensions: doc.embedding.length,
-              textLength: doc.text.length,
-              createdAt: new Date()
-            }
-          };
-
-          // Store using MongoDB service
-          const db = await mongoService.connect();
-          const collection = db.collection('thai_insurance_docs');
-          const result = await collection.insertOne(document);
-          
-          return result.insertedId;
-        } catch (error) {
-          console.error(`❌ Error storing document ${index}:`, error.message);
-          return null;
-        }
-      });
-
-      const results = await Promise.allSettled(promises);
-      const successCount = results.filter(r => r.status === 'fulfilled' && r.value).length;
-      stored += successCount;
-
-      console.log(`   Batch ${Math.floor(i/batchSize) + 1}: ${successCount}/${batch.length} documents stored`);
-    }
-
-    console.log(`\n✅ Successfully stored ${stored}/${insuranceData.length} documents!\n`);
-
-    // Test vector similarity search
-    console.log('🔍 Testing similarity search with Thai queries...');
-    const testQueries = [
-      'ประกันชีวิต',
-      'เบี้ยประกันภัย',
-      'ผู้รับประโยชน์',
-      'การเคลม',
-      'สัญญาประกันภัย'
-    ];
-
-    for (const query of testQueries) {
+    // Process each JSON file
+    for (const filename of jsonFiles) {
+      const filePath = join(datasetPath, filename);
+      
+      console.log(`📄 Processing: ${filename}`);
+      
       try {
-        // Manual similarity search since we don't have Atlas Search set up yet
-        const results = await searchSimilarDocuments(query, insuranceData);
-        console.log(`   Query: "${query}" -> Found ${results.length} similar documents`);
+        const fileContent = await readFile(filePath, 'utf-8');
+        const insuranceData = JSON.parse(fileContent);
         
-        if (results.length > 0) {
-          console.log(`     Top result: ${results[0].title} (similarity: ${results[0].similarity.toFixed(4)})`);
-          console.log(`     Content preview: ${results[0].content.substring(0, 100)}...\n`);
+        if (!Array.isArray(insuranceData)) {
+          console.log(`   ⚠️  Skipping ${filename} - not an array format`);
+          continue;
         }
-      } catch (error) {
-        console.error(`❌ Error searching for "${query}":`, error.message);
+
+        console.log(`   📊 Found ${insuranceData.length} documents in ${filename}`);
+        totalDocuments += insuranceData.length;
+
+        // Store documents in batches for better performance
+        const batchSize = 50;
+        let fileStored = 0;
+
+        for (let i = 0; i < insuranceData.length; i += batchSize) {
+          const batch = insuranceData.slice(i, i + batchSize);
+          const promises = batch.map(async (doc, index) => {
+            try {
+              // Prepare document for storage
+              const document = {
+                title: `${filename} - ${doc.file || 'Document'} (Page ${doc.page || index + 1})`,
+                content: doc.text || doc.content || '',
+                embedding: doc.embedding || [],
+                metadata: {
+                  sourceFile: filename,
+                  originalFile: doc.file || null,
+                  pageNumber: doc.page || null,
+                  language: 'thai',
+                  documentType: 'insurance_policy',
+                  source: 'Thai Insurance Documents',
+                  embeddingDimensions: (doc.embedding || []).length,
+                  textLength: (doc.text || doc.content || '').length,
+                  importedAt: new Date()
+                }
+              };
+
+              // Store using MongoDB service
+              const db = await mongoService.connect();
+              const collection = db.collection('thai_insurance_docs');
+              const result = await collection.insertOne(document);
+              
+              return result.insertedId;
+            } catch (error) {
+              console.error(`     ❌ Error storing document ${index} from ${filename}:`, error.message);
+              return null;
+            }
+          });
+
+          const results = await Promise.allSettled(promises);
+          const successCount = results.filter(r => r.status === 'fulfilled' && r.value).length;
+          fileStored += successCount;
+
+          console.log(`     Batch ${Math.floor(i/batchSize) + 1}: ${successCount}/${batch.length} documents imported`);
+        }
+
+        totalStored += fileStored;
+        console.log(`   ✅ ${filename}: ${fileStored}/${insuranceData.length} documents imported\n`);
+
+      } catch (fileError) {
+        console.error(`   ❌ Error processing ${filename}:`, fileError.message);
       }
     }
 
-    // Test retrieval from database
-    console.log('📚 Testing document retrieval from database...');
-    const db = await mongoService.connect();
-    const collection = db.collection('thai_insurance_docs');
-    
-    const totalDocs = await collection.countDocuments();
-    console.log(`   Total documents in database: ${totalDocs}`);
-    
-    const sampleDoc = await collection.findOne({});
-    if (sampleDoc) {
-      console.log(`   Sample document title: ${sampleDoc.title}`);
-      console.log(`   Embedding dimensions: ${sampleDoc.embedding.length}`);
-      console.log(`   Text length: ${sampleDoc.content.length} characters\n`);
-    }
-
-    // Create a search index recommendation
-    console.log('📋 Vector Search Index Recommendation:');
-    console.log('To enable fast vector search in MongoDB Atlas:');
-    console.log('1. Go to your Atlas cluster → Search → Create Index');
-    console.log('2. Use this configuration:');
-    console.log(JSON.stringify({
-      "name": "thai_insurance_vector_index",
-      "type": "vectorSearch",
-      "definition": {
-        "fields": [
-          {
-            "type": "vector",
-            "path": "embedding",
-            "numDimensions": insuranceData[0]?.embedding?.length || 1536,
-            "similarity": "cosine"
-          },
-          {
-            "type": "filter",
-            "path": "metadata.language"
-          },
-          {
-            "type": "filter", 
-            "path": "metadata.documentType"
-          }
-        ]
-      }
-    }, null, 2));
-
-    console.log('\n🎉 MongoDB test with insurance embeddings completed successfully!');
+    console.log(`🎉 IMPORT COMPLETE!`);
+    console.log(`📊 Total files processed: ${jsonFiles.length}`);
+    console.log(`📋 Total documents found: ${totalDocuments}`);
+    console.log(`✅ Total documents imported: ${totalStored}`);
+    console.log(`🗃️  Collection: thai_insurance_docs`);
+    console.log(`📝 Ready for vector search operations!\n`);
 
   } catch (error) {
-    console.error('❌ Test failed:', error.message);
+    console.error('❌ Import failed:', error.message);
     
     if (error.message.includes('ENOENT')) {
-      console.log('🔧 Make sure the embedding file exists at: ./src/services/emb_กรมธรรมประกันชีวิต1.json');
+      console.log('🔧 Make sure the embeded_dataset folder exists at: /Users/aum/Downloads/embeded_dataset');
     }
     
-    if (error.message.includes('<db_password>')) {
-      console.log('🔧 Update your .env file with the correct MongoDB password');
+    if (error.message.includes('authentication') || error.message.includes('password')) {
+      console.log('🔧 Check your MongoDB credentials in the .env file');
     }
   } finally {
     await mongoService.disconnect();
   }
 }
 
-// Simple similarity search function for testing
-async function searchSimilarDocuments(query, documents, topK = 3) {
-  // Generate simple embedding for query (this is a basic implementation)
-  const queryEmbedding = generateSimpleEmbedding(query);
-  
-  // Calculate similarities
-  const similarities = documents.map(doc => ({
-    title: `${doc.file} (Page ${doc.page})`,
-    content: doc.text,
-    similarity: cosineSimilarity(queryEmbedding, doc.embedding),
-    metadata: {
-      file: doc.file,
-      page: doc.page
-    }
-  }));
-
-  // Sort by similarity and return top results
-  return similarities
-    .sort((a, b) => b.similarity - a.similarity)
-    .slice(0, topK);
-}
-
-// Simple embedding generation (for query)
-function generateSimpleEmbedding(text, dimensions = 1536) {
-  const embedding = new Array(dimensions).fill(0);
-  
-  for (let i = 0; i < text.length; i++) {
-    const char = text.charCodeAt(i);
-    const index = char % dimensions;
-    embedding[index] += Math.sin(char * 0.1) * Math.cos(i * 0.1);
-  }
-  
-  // Normalize
-  const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-  return embedding.map(val => magnitude > 0 ? val / magnitude : 0);
-}
-
-// Cosine similarity calculation
-function cosineSimilarity(vecA, vecB) {
-  const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
-  const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
-  const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
-  return magnitudeA && magnitudeB ? dotProduct / (magnitudeA * magnitudeB) : 0;
-}
-
-// Run the test
-testWithInsuranceEmbeddings();
+// Run the import
+importInsuranceEmbeddings();

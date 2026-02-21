@@ -1,7 +1,20 @@
+// Environment variables - compatible with both Node.js and browser
+const getEnvVar = (name, defaultValue = '') => {
+  // For Node.js
+  if (typeof process !== 'undefined' && process.env) {
+    return process.env[name] || defaultValue;
+  }
+  // For browser (Vite)
+  if (typeof import.meta !== 'undefined' && import.meta.env) {
+    return import.meta.env[name] || defaultValue;
+  }
+  return defaultValue;
+};
+
 export const API_CONFIG = {
-  baseUrl: import.meta.env.VITE_API_BASE_URL || 'https://api.opentyphoon.ai/v1',
-  apiKey: import.meta.env.VITE_API_KEY,
-  model: import.meta.env.VITE_MODEL_NAME || 'typhoon-v2.1-12b-instruct',
+  baseUrl: getEnvVar('VITE_API_BASE_URL', 'https://api.opentyphoon.ai/v1'),
+  apiKey: getEnvVar('VITE_API_KEY'),
+  model: getEnvVar('VITE_MODEL_NAME', 'typhoon-v2.5-30b-a3b-instruct'),
   maxTokens: 1000,
   temperature: 0.6
 };

@@ -91,7 +91,7 @@ class MongoService {
   async storeDocument(title, content, embedding, metadata = {}) {
     try {
       const db = await this.connect();
-      const collection = db.collection('documents');
+      const collection = db.collection('thai_insurance_docs');
 
       const document = {
         title,
@@ -133,7 +133,7 @@ class MongoService {
   }
 
   // Vector similarity search (requires MongoDB Atlas Search index)
-  async vectorSearch(queryEmbedding, limit = 5, collection = 'documents') {
+  async vectorSearch(queryEmbedding, limit = 5, collection = 'thai_insurance_docs') {
     try {
       const db = await this.connect();
       const coll = db.collection(collection);

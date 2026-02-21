@@ -101,19 +101,24 @@ class EmbeddingService {
     }
   }
 
-  // Find similar content using embeddings
+  // Find similar content using embeddings with enhanced scoring
   async findSimilarContent(query, limit = 5) {
     try {
+      console.log(`🔍 Searching for content similar to: "${query}"`);
       const queryEmbedding = await this.generateEmbedding(query);
       
       // Try vector search first (requires Atlas Search index)
       try {
-        return await mongoService.vectorSearch(queryEmbedding, limit);
+        const results = await mongoService.vectorSearch(queryEmbedding, limit);
+        console.log(`✅ Vector search returned ${results.length} results`);
+        return results;
       } catch (vectorError) {
-        console.warn('Vector search not available, using fallback method');
+        console.warn('⚠️ Vector search not available, using fallback method');
         
         // Fallback: Manual similarity calculation
-        return await this.manualSimilaritySearch(queryEmbedding, limit);
+        const results = await this.manualSimilaritySearch(queryEmbedding, limit);
+        console.log(`✅ Manual search returned ${results.length} results`);
+        return results;
       }
     } catch (error) {
       console.error('❌ Error finding similar content:', error.message);
@@ -124,19 +129,38 @@ class EmbeddingService {
   // Manual similarity search (when Atlas Search is not available)
   async manualSimilaritySearch(queryEmbedding, limit = 5) {
     try {
+      console.log('🔄 Performing manual similarity search...');
       const db = await mongoService.connect();
-      const collection = db.collection('documents');
+      const collection = db.collection('thai_insurance_docs');
       
       const documents = await collection.find({}).toArray();
+      console.log(`📄 Found ${documents.length} documents in database`);
       
-      const similarities = documents.map(doc => ({
-        ...doc,
-        similarity: this.cosineSimilarity(queryEmbedding, doc.embedding)
-      }));
+      if (documents.length === 0) {
+        console.log('⚠️ No documents found in database');
+        return [];
+      }
       
-      return similarities
+      const similarities = documents
+        .filter(doc => doc.embedding && Array.isArray(doc.embedding))
+        .map(doc => {
+          const similarity = this.cosineSimilarity(queryEmbedding, doc.embedding);
+          return {
+            ...doc,
+            similarity: similarity,
+            score: similarity // Add score field for compatibility
+          };
+        })
+        .filter(doc => doc.similarity > 0); // Filter out zero similarities
+      
+      const sortedResults = similarities
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
+      
+      console.log(`✅ Manual search completed, returning ${sortedResults.length} results`);
+      console.log(`🎯 Top similarity scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+      
+      return sortedResults;
     } catch (error) {
       console.error('❌ Error in manual similarity search:', error.message);
       throw error;
