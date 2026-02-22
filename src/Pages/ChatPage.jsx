@@ -49,15 +49,22 @@ export default function ChatPage() {
           </div>
         ) : (
           messages.map((msg, idx) => (
-            <div key={idx} className={`mb-4 ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+            <div
+              key={idx}
+              className={`flex w-full mb-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
               <div
-                className={`inline-block p-3 rounded-lg max-w-xs ${
+                className={`p-3 rounded-2xl shadow-sm max-w-[70%] break-words whitespace-pre-line flex items-start gap-2 ${
                   msg.role === 'user'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-200 text-gray-800'
+                    ? 'bg-blue-500 text-white rounded-br-md'
+                    : 'bg-gray-100 text-gray-800 rounded-bl-md'
                 }`}
+                style={{ wordBreak: 'break-word' }}
               >
-                {msg.content}
+                {msg.role === 'assistant' && (
+                  <span className="text-xl" aria-label="AI">🤖</span>
+                )}
+                <span>{msg.content}</span>
               </div>
             </div>
           ))
