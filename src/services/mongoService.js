@@ -187,6 +187,67 @@ class MongoService {
       throw error;
     }
   }
+
+  // Get user documents (uploaded by a specific user)
+  async getUserDocuments(userId, limit = 10) {
+    try {
+      const db = await this.connect();
+      const collection = db.collection('user_documents');
+
+      const documents = await collection
+        .find({ userId })
+        .sort({ 'metadata.createdAt': -1 })
+        .limit(limit)
+        .toArray();
+
+      return documents;
+    } catch (error) {
+      console.error('❌ Error fetching user documents:', error.message);
+      return [];
+    }
+  }
+
+  // Get system documents (from thai_insurance_docs collection)
+  async getSystemDocuments(limit = 10) {
+    try {
+      const db = await this.connect();
+      const collection = db.collection('thai_insurance_docs');
+
+      const documents = await collection
+        .find({})
+        .limit(limit)
+        .toArray();
+
+      return documents;
+    } catch (error) {
+      console.error('❌ Error fetching system documents:', error.message);
+      return [];
+    }
+  }
+
+  // Get all documents for dashboard (prioritized: user docs first, then system docs)
+  async getAllDocumentsForDashboard(userId = null, limit = 20) {
+    try {
+      let userDocs = [];
+      let systemDocs = [];
+
+      // If user is logged in, get their documents first
+      if (userId) {
+        userDocs = await this.getUserDocuments(userId, limit);
+      }
+
+      // Fill remaining with system documents
+      const remaining = Math.max(0, limit - userDocs.length);
+      if (remaining > 0) {
+        systemDocs = await this.getSystemDocuments(remaining);
+      }
+
+      return [...userDocs, ...systemDocs];
+    } catch (error) {
+      console.error('❌ Error fetching all documents:', error.message);
+      return [];
+    }
+  }
 }
 
 export default new MongoService();
