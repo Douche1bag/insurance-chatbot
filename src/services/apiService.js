@@ -1,4 +1,4 @@
-import { API_CONFIG, SYSTEM_MESSAGE } from '../utils/constants';
+import { API_CONFIG, SYSTEM_MESSAGE } from '../utils/constants.js';
 
 export class APIService {
   static async sendMessage(messages) {
