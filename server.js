@@ -117,6 +117,38 @@ app.post('/api/auth/login', async (req, res) => {
 
 // ===== END AUTHENTICATION ENDPOINTS =====
 
+// Chat with RAG endpoint
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { query, userId } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Query is required' 
+      });
+    }
+
+    const ragService = (await import('./src/services/ragService.js')).default;
+    
+    console.log(`💬 Chat query: "${query}" from user: ${userId || 'guest'}`);
+    
+    const result = await ragService.queryWithRAG(query, {
+      contextLimit: 3,
+      language: 'thai',
+      userId: userId || null
+    });
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Chat error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running' });
@@ -372,6 +404,59 @@ app.get('/api/verify/:documentId', async (req, res) => {
     res.json(verification);
   } catch (error) {
     console.error('Error verifying document:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Test RAG search on user documents
+app.post('/api/test-rag', async (req, res) => {
+  try {
+    const { query, userId } = req.body;
+    
+    if (!query) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Query is required' 
+      });
+    }
+
+    const embeddingService = (await import('./src/services/embeddingService.js')).default;
+    
+    // Search user documents
+    let userResults = [];
+    if (userId) {
+      userResults = await embeddingService.findSimilarUserContent(query, userId, 3);
+    }
+    
+    // Search system documents
+    const systemResults = await embeddingService.findSimilarContent(query, 3);
+    
+    res.json({
+      success: true,
+      query,
+      userId,
+      results: {
+        userDocuments: userResults.map(doc => ({
+          title: doc.title,
+          similarity: (doc.similarity * 100).toFixed(1) + '%',
+          contentPreview: doc.content?.substring(0, 200) + '...',
+          source: 'user_upload'
+        })),
+        systemDocuments: systemResults.map(doc => ({
+          title: doc.title,
+          similarity: (doc.similarity * 100).toFixed(1) + '%',
+          contentPreview: doc.content?.substring(0, 200) + '...',
+          source: 'system'
+        }))
+      },
+      summary: {
+        userDocumentsFound: userResults.length,
+        systemDocumentsFound: systemResults.length,
+        totalRelevantDocs: userResults.length + systemResults.length
+      }
+    });
+  } catch (error) {
+    console.error('Error testing RAG:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

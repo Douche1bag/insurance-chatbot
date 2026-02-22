@@ -191,6 +191,51 @@ class EmbeddingService {
       return { context: [], query, timestamp: new Date() };
     }
   }
+
+  // Find similar content in USER documents
+  async findSimilarUserContent(query, userId, limit = 5) {
+    try {
+      console.log(`🔍 Searching user documents for userId: ${userId}`);
+      const queryEmbedding = await this.generateEmbedding(query);
+      
+      const db = await mongoService.connect();
+      const collection = db.collection('user_documents');
+      
+      const userDocuments = await collection.find({ userId }).toArray();
+      console.log(`📄 Found ${userDocuments.length} user documents`);
+      
+      if (userDocuments.length === 0) {
+        return [];
+      }
+      
+      const similarities = userDocuments
+        .filter(doc => doc.embedding && Array.isArray(doc.embedding))
+        .map(doc => {
+          const similarity = this.cosineSimilarity(queryEmbedding, doc.embedding);
+          return {
+            ...doc,
+            similarity: similarity,
+            score: similarity,
+            source: 'user_upload'
+          };
+        })
+        .filter(doc => doc.similarity > 0);
+      
+      const sortedResults = similarities
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+      
+      console.log(`✅ User search completed, returning ${sortedResults.length} results`);
+      if (sortedResults.length > 0) {
+        console.log(`🎯 Top user doc scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+      }
+      
+      return sortedResults;
+    } catch (error) {
+      console.error('❌ Error finding similar user content:', error.message);
+      return [];
+    }
+  }
 }
 
 export default new EmbeddingService();
