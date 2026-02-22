@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import MainLayout from './layout/MainLayout';
 import LoginPage from './Pages/LoginPage';
 import DashboardPage from './Pages/DashboardPage';
@@ -11,10 +11,38 @@ import './Styles/App.css';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('chat');
-  const [isLoggedIn, setIsLoggedIn] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
+
+  // Check for existing session on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      try {
+        const userData = JSON.parse(savedUser);
+        setUser(userData);
+        setIsLoggedIn(true);
+      } catch (error) {
+        console.error('Error loading user session:', error);
+        localStorage.removeItem('user');
+      }
+    }
+  }, []);
+
+  const handleLogin = (userData) => {
+    setUser(userData);
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    setUser(null);
+    setIsLoggedIn(false);
+    setCurrentPage('chat');
+  };
 
   if (!isLoggedIn) {
-    return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
+    return <LoginPage onLogin={handleLogin} />;
   }
 
   const menuItems = [
@@ -28,8 +56,7 @@ export default function App() {
 
   const handleMenuClick = (key) => {
     if (key === 'logout') {
-      setIsLoggedIn(false);
-      setCurrentPage('dashboard');
+      handleLogout();
     } else {
       setCurrentPage(key);
     }
@@ -38,22 +65,22 @@ export default function App() {
   let page = null;
   switch (currentPage) {
     case 'dashboard':
-      page = <DashboardPage />;
+      page = <DashboardPage user={user} />;
       break;
     case 'upload':
-      page = <UploadPage />;
+      page = <UploadPage user={user} />;
       break;
     case 'chat':
-      page = <ChatPage />;
+      page = <ChatPage user={user} />;
       break;
     case 'compare':
-      page = <ComparisonPage />;
+      page = <ComparisonPage user={user} />;
       break;
     case 'admin':
-      page = <AdminPage />;
+      page = <AdminPage user={user} />;
       break;
     default:
-      page = <DashboardPage />;
+      page = <DashboardPage user={user} />;
   }
 
   return (

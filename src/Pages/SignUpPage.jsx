@@ -11,20 +11,46 @@ export default function SignUpPage({ onSignUp }) {
   const [error, setError] = useState("");
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    
     if (!email || !password || !confirmPassword) {
       setError("กรุณากรอกข้อมูลให้ครบถ้วน");
       return;
     }
+    
     if (password !== confirmPassword) {
       setError("รหัสผ่านไม่ตรงกัน");
       return;
     }
-    setError("");
-    if (onSignUp) onSignUp(email, password);
-    // Redirect to login page after successful sign up
-    navigate("/");
+    
+    if (password.length < 4) {
+      setError("รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร");
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Store user info and redirect to main app
+        localStorage.setItem('user', JSON.stringify(result.user));
+        if (onSignUp) onSignUp(result.user);
+        navigate("/");
+      } else {
+        setError(result.error || 'สมัครสมาชิกไม่สำเร็จ');
+      }
+    } catch (error) {
+      console.error('Signup error:', error);
+      setError('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+    }
   };
 
   return (

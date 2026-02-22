@@ -87,7 +87,7 @@ class MongoService {
     }
   }
 
-  // Store document with vector embeddings for RAG
+  // Store document with vector embeddings for RAG (system documents)
   async storeDocument(title, content, embedding, metadata = {}) {
     try {
       const db = await this.connect();
@@ -110,6 +110,64 @@ class MongoService {
     } catch (error) {
       console.error('❌ Error storing document:', error.message);
       throw error;
+    }
+  }
+
+  // Store user-uploaded document in separate collection
+  async storeUserDocument(userId, title, content, embedding, metadata = {}) {
+    try {
+      const db = await this.connect();
+      const collection = db.collection('user_documents');
+
+      const document = {
+        userId, // Associate with specific user
+        title,
+        content,
+        embedding, // Vector embedding for similarity search
+        metadata: {
+          ...metadata,
+          createdAt: new Date(),
+          contentLength: content.length,
+          embeddingDimensions: embedding.length
+        }
+      };
+
+      const result = await collection.insertOne(document);
+      console.log(`✅ User document stored in user_documents: ${result.insertedId}`);
+      return result.insertedId;
+    } catch (error) {
+      console.error('❌ Error storing user document:', error.message);
+      throw error;
+    }
+  }
+
+  // Verify document was stored with embedding
+  async verifyDocumentWithEmbedding(documentId, collectionName = 'user_documents') {
+    try {
+      const db = await this.connect();
+      const collection = db.collection(collectionName);
+      
+      const doc = await collection.findOne({ _id: documentId });
+      
+      if (!doc) {
+        return { success: false, error: 'Document not found' };
+      }
+      
+      const hasEmbedding = doc.embedding && Array.isArray(doc.embedding) && doc.embedding.length > 0;
+      
+      return {
+        success: true,
+        documentId: doc._id,
+        title: doc.title,
+        hasEmbedding,
+        embeddingDimensions: hasEmbedding ? doc.embedding.length : 0,
+        contentLength: doc.content?.length || 0,
+        createdAt: doc.metadata?.createdAt,
+        collection: collectionName
+      };
+    } catch (error) {
+      console.error('❌ Error verifying document:', error.message);
+      return { success: false, error: error.message };
     }
   }
 
@@ -246,6 +304,99 @@ class MongoService {
     } catch (error) {
       console.error('❌ Error fetching all documents:', error.message);
       return [];
+    }
+  }
+
+  // ===== USER AUTHENTICATION =====
+  
+  // Register new user
+  async registerUser(email, password, name = '') {
+    try {
+      const db = await this.connect();
+      const usersCollection = db.collection('users');
+
+      // Check if user already exists
+      const existingUser = await usersCollection.findOne({ email });
+      if (existingUser) {
+        throw new Error('อีเมลนี้ถูกใช้งานแล้ว');
+      }
+
+      // Create user with simple password (you can add crypto.createHash if you want basic hashing)
+      const user = {
+        email,
+        password, // Simple password storage
+        name: name || email.split('@')[0],
+        createdAt: new Date()
+      };
+
+      const result = await usersCollection.insertOne(user);
+      
+      return {
+        success: true,
+        user: {
+          id: result.insertedId.toString(),
+          email: user.email,
+          name: user.name
+        }
+      };
+    } catch (error) {
+      console.error('❌ Registration error:', error);
+      throw error;
+    }
+  }
+
+  // Login user
+  async loginUser(email, password) {
+    try {
+      const db = await this.connect();
+      const usersCollection = db.collection('users');
+
+      // Find user
+      const user = await usersCollection.findOne({ email });
+      if (!user) {
+        throw new Error('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      }
+
+      // Check password
+      if (user.password !== password) {
+        throw new Error('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      }
+
+      return {
+        success: true,
+        user: {
+          id: user._id.toString(),
+          email: user.email,
+          name: user.name
+        }
+      };
+    } catch (error) {
+      console.error('❌ Login error:', error);
+      throw error;
+    }
+  }
+
+  // Get user by ID
+  async getUserById(userId) {
+    try {
+      const db = await this.connect();
+      const usersCollection = db.collection('users');
+      
+      const { ObjectId } = await import('mongodb');
+      const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+      
+      if (!user) {
+        throw new Error('ไม่พบผู้ใช้');
+      }
+
+      return {
+        id: user._id.toString(),
+        email: user.email,
+        name: user.name
+      };
+    } catch (error) {
+      console.error('❌ Get user error:', error);
+      throw error;
     }
   }
 }
