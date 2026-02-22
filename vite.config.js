@@ -10,6 +10,13 @@ export default defineConfig({
     host: true,
     // allow requests with ngrok host header (use 'all' for convenience while developing)
     allowedHosts: ['heliaean-bleakly-rosana.ngrok-free.dev'],
-    open: true
+    open: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        secure: false
+      }
+    }
   }
 })
