@@ -89,11 +89,7 @@ export default function ChatPage({ user }) {
               className={`flex w-full mb-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-<<<<<<< HEAD
-                className={`p-3 rounded-2xl shadow-sm max-w-[70%] break-words whitespace-pre-line flex items-start gap-2 ${
-=======
                 className={`inline-block p-3 rounded-lg max-w-xl whitespace-pre-line ${
->>>>>>> origin/main
                   msg.role === 'user'
                     ? 'bg-blue-500 text-white rounded-br-md'
                     : 'bg-gray-100 text-gray-800 rounded-bl-md'
@@ -136,3 +132,5 @@ export default function ChatPage({ user }) {
     </div>
   );
 }
+
+ 
