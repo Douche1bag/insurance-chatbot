@@ -227,14 +227,14 @@ class RAGService {
       });
       
       const instruction = language === 'thai' ? 
-        '\n\n⚠️ คำแนะนำ: กรุณาอ้างอิงข้อมูลข้างต้นในการตอบ และระบุแหล่งข้อมูลที่ใช้' :
-        '\n\n⚠️ Instructions: Please reference the above information in your response and cite the sources used';
+        '\n\n คำแนะนำ: กรุณาอ้างอิงข้อมูลข้างต้นในการตอบ และระบุแหล่งข้อมูลที่ใช้' :
+        '\n\n Instructions: Please reference the above information in your response and cite the sources used';
       
       systemMessage += instruction;
     } else {
       const noDataMessage = language === 'thai' ? 
-        '\n\n⚠️ ไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญสำหรับข้อมูลที่แม่นยำ' :
-        '\n\n⚠️ No relevant information found in database. Please answer based on general insurance knowledge and recommend consulting an expert for accurate information';
+        '\n\n ไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญสำหรับข้อมูลที่แม่นยำ' :
+        '\n\n No relevant information found in database. Please answer based on general insurance knowledge and recommend consulting an expert for accurate information';
       
       systemMessage += noDataMessage;
     }

@@ -64,7 +64,7 @@ export default function ChatPage({ user }) {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-4xl mx-auto">
+    <div className="flex flex-col h-screen max-w-4xl mx-auto">
       <div className="flex justify-between items-center mb-4">
         <h1 className="text-2xl font-bold">AI Chat {user ? `- ${user.name}` : ''}</h1>
         {lastContext && (

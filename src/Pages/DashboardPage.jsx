@@ -25,27 +25,72 @@ export const calculateCoverageGrowth = (current, lastYear) => {
 
 const getCurrentUser = () => {
   try {
-    const userData = localStorage.getItem('currentUser');
+    // Match the key used in LoginPage: 'user' not 'currentUser'
+    const userData = localStorage.getItem('user');
     return userData ? JSON.parse(userData) : null;
   } catch {
     return null;
   }
 };
 
+const extractPolicyNumber = (content = '') => {
+  // Try multiple patterns for policy number
+  const patterns = [
+    /เลขที่กรมธรรม์\s*[:：]?\s*([A-Z0-9\-]+)/i,
+    /กรมธรรม์เลขที่\s*[:：]?\s*([A-Z0-9\-]+)/i,
+    /Policy\s*No\.?\s*[:：]?\s*([A-Z0-9\-]+)/i,
+    /เลขกรมธรรม์\s*[:：]?\s*([A-Z0-9\-]+)/i
+  ];
+  
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match) return match[1].trim();
+  }
+  return null;
+};
+
 const extractCompany = (content = '') => {
-  const companies = ['AIA', 'FWD', 'แอกซ่า', 'เอไอเอ', 'อลิอันซ์', 'มิวนิค'];
-  return companies.find(c => content.includes(c)) || 'Unknown';
+  const companies = [
+    'AIA', 'FWD', 'แอกซ่า', 'เอไอเอ', 'อลิอันซ์', 'มิวนิค',
+    'กรุงเทพประกันชีวิต', 'เมืองไทยประกันชีวิต', 'ไทยประกันชีวิต'
+  ];
+  return companies.find(c => content.includes(c)) || 'ไม่ระบุ';
 };
 
 const extractCoverage = (content = '') => {
-  const match = content.match(/(\d{1,3}(?:,\d{3})*)\s*บาท/);
-  if (match) return parseInt(match[1].replace(/,/g, '')) || 0;
+  // Try to find coverage amount in various formats
+  const patterns = [
+    /ทุนประกัน\s*[:：]?\s*(\d{1,3}(?:,\d{3})*)\s*บาท/,
+    /จำนวนเงินเอาประกัน\s*[:：]?\s*(\d{1,3}(?:,\d{3})*)\s*บาท/,
+    /ความคุ้มครอง\s*[:：]?\s*(\d{1,3}(?:,\d{3})*)\s*บาท/,
+    /(\d{1,3}(?:,\d{3})*)\s*บาท/  // Fallback: any number with บาท
+  ];
+  
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match) {
+      const amount = parseInt(match[1].replace(/,/g, ''));
+      if (amount > 10000) return amount; // Only consider amounts > 10,000 as coverage
+    }
+  }
   return 0;
 };
 
 const extractPremium = (content = '') => {
-  const match = content.match(/เบี้ยประกัน\s*(\d{1,3}(?:,\d{3})*)/);
-  if (match) return parseInt(match[1].replace(/,/g, '')) || 0;
+  // Try to find premium amount in various formats
+  const patterns = [
+    /เบี้ยประกันรายปี\s*[:：]?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*บาท/,
+    /เบี้ยประกันรวม\s*[:：]?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*บาท/,
+    /เบี้ยประกัน\s*[:：]?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*บาท/,
+    /Premium\s*[:：]?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*บาท/
+  ];
+  
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match) {
+      return parseFloat(match[1].replace(/,/g, '')) || 0;
+    }
+  }
   return 0;
 };
 
@@ -88,6 +133,9 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       const currentUser = getCurrentUser();
+      
+      console.log('👤 Current user:', currentUser);
+      console.log('🔑 User ID:', currentUser?.id);
 
       const { default: mongoService } = await import('../services/mongoService');
 
@@ -97,18 +145,44 @@ export default function DashboardPage() {
           20
         )) || [];
 
-      const transformed = documents.map((doc, index) => ({
-        id: doc?._id || String(index),
-        title:
-          doc?.content?.substring(0, 100) + '...' ||
-          doc?.title ||
-          'Untitled',
-        provider: extractCompany(doc?.content || ''),
-        type: doc?.metadata?.type || 'ประกันชีวิต',
-        coverage: extractCoverage(doc?.content || ''),
-        premium: extractPremium(doc?.content || ''),
-        status: 'Active'
-      }));
+      console.log('📄 Fetched documents:', documents.length);
+      console.log('📄 Raw documents:', documents);
+
+      // Transform documents and extract info
+      const extracted = documents.map((doc, index) => {
+        const content = doc?.content || '';
+        const policyNo = extractPolicyNumber(content);
+        
+        return {
+          id: doc?._id || String(index),
+          policyNumber: policyNo || `AUTO-${index + 1}`,
+          title: doc?.title || 'Untitled',
+          provider: extractCompany(content),
+          type: doc?.metadata?.type || 'ประกันชีวิต',
+          coverage: extractCoverage(content),
+          premium: extractPremium(content),
+          status: 'Active',
+          content: content.substring(0, 200) + '...',
+          uploadedAt: doc?.metadata?.createdAt || new Date()
+        };
+      });
+
+      // Group by policy number to combine multiple pages
+      const policyMap = new Map();
+      extracted.forEach(item => {
+        const key = item.policyNumber;
+        if (policyMap.has(key)) {
+          const existing = policyMap.get(key);
+          // Merge: take max coverage and sum premiums
+          existing.coverage = Math.max(existing.coverage, item.coverage);
+          existing.premium += item.premium;
+        } else {
+          policyMap.set(key, { ...item });
+        }
+      });
+
+      const transformed = Array.from(policyMap.values());
+      console.log('📊 Processed policies:', transformed);
 
       setPolicies(transformed);
     } catch (error) {
@@ -194,8 +268,14 @@ export default function DashboardPage() {
                   <div className="font-bold">
                     {p.provider} {p.type}
                   </div>
-                  <div className="text-sm text-gray-500">
-                    ฿{(p.coverage || 0).toLocaleString()}
+                  <div className="text-xs text-gray-400">
+                    เลขที่: {p.policyNumber}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    ทุนประกัน: ฿{(p.coverage || 0).toLocaleString()}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    เบี้ย: ฿{(p.premium || 0).toLocaleString()}/ปี
                   </div>
                 </div>
                 {statusBadge(p.status)}

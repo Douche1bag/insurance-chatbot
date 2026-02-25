@@ -14,21 +14,6 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
 
-  // Check for existing session on mount
-  useEffect(() => {
-    const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      try {
-        const userData = JSON.parse(savedUser);
-        setUser(userData);
-        setIsLoggedIn(true);
-      } catch (error) {
-        console.error('Error loading user session:', error);
-        localStorage.removeItem('user');
-      }
-    }
-  }, []);
-
   const handleLogin = (userData) => {
     setUser(userData);
     setIsLoggedIn(true);
