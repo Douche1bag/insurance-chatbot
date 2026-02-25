@@ -35,8 +35,8 @@ class EmbeddingService {
     }
   }
 
-  // Fallback: Generate a simple numeric representation (for demo)
-  generateSimpleEmbedding(text, dimensions = 128) {
+  // Fallback: Generate a simple numeric representation (384 dims to match system docs)
+  generateSimpleEmbedding(text, dimensions = 384) {
     const embedding = new Array(dimensions).fill(0);
     
     // Simple hash-based embedding

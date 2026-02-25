@@ -15,7 +15,7 @@ export const API_CONFIG = {
   baseUrl: getEnvVar('VITE_API_BASE_URL', 'https://api.opentyphoon.ai/v1'),
   apiKey: getEnvVar('VITE_API_KEY'),
   model: getEnvVar('VITE_MODEL_NAME', 'typhoon-v2.5-30b-a3b-instruct'),
-  maxTokens: 1000,
+  maxTokens: 4000, // Increased from 1000 to allow RAG context + response
   temperature: 0.6
 };
 

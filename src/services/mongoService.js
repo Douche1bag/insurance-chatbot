@@ -87,7 +87,7 @@ class MongoService {
     }
   }
 
-  // Store document with vector embeddings for RAG (system documents)
+  // Store document with vector embeddings for RAG (System documents)
   async storeDocument(title, content, embedding, metadata = {}) {
     try {
       const db = await this.connect();
