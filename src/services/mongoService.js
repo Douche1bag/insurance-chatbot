@@ -65,17 +65,21 @@ class MongoService {
       const db = await this.connect();
       const collection = db.collection('chat_history');
 
+      // Safety checks
+      const safeUserMessage = userMessage || '';
+      const safeBotResponse = botResponse || '';
+
       const chatRecord = {
         userId,
-        userMessage,
-        botResponse,
+        userMessage: safeUserMessage,
+        botResponse: safeBotResponse,
         messageEmbedding: embeddings.messageEmbedding || null,
         responseEmbedding: embeddings.responseEmbedding || null,
         timestamp: new Date(),
         metadata: {
           model: process.env.VITE_MODEL_NAME,
-          messageLength: userMessage.length,
-          responseLength: botResponse.length,
+          messageLength: safeUserMessage.length,
+          responseLength: safeBotResponse.length,
           hasEmbeddings: !!(embeddings.messageEmbedding && embeddings.responseEmbedding)
         }
       };

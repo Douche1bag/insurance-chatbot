@@ -15,7 +15,7 @@ export const API_CONFIG = {
   baseUrl: getEnvVar('VITE_API_BASE_URL', 'https://api.opentyphoon.ai/v1'),
   apiKey: getEnvVar('VITE_API_KEY'),
   model: getEnvVar('VITE_MODEL_NAME', 'typhoon-v2.5-30b-a3b-instruct'),
-  maxTokens: 4000, // Increased from 1000 to allow RAG context + response
+  maxTokens: 8000, // Increased to handle longer context with conversation history and semantic search
   temperature: 0.6
 };
 
@@ -40,4 +40,4 @@ export const MESSAGES = {
   HINT: 'กด Enter เพื่อส่งข้อความ • Shift + Enter เพื่อขึ้นบรรทัดใหม่'
 };
 
-export const APP_NAME = "InsureWise AI";
+export const APP_NAME = "AI_Insurance";

@@ -4,8 +4,6 @@ import LoginPage from './Pages/LoginPage';
 import DashboardPage from './Pages/DashboardPage';
 import UploadPage from './Pages/UploadPage';
 import ChatPage from './Pages/ChatPage';
-import ComparisonPage from './Pages/ComparisonPage';
-import AdminPage from './Pages/AdminPage';
 import { LayoutDashboard, Upload, MessageSquare, BarChart3, Users, LogOut } from 'lucide-react';
 import './Styles/App.css';
 
@@ -34,8 +32,6 @@ export default function App() {
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, active: currentPage === 'dashboard' },
     { key: 'upload', label: 'Upload', icon: Upload, active: currentPage === 'upload' },
     { key: 'chat', label: 'AI Chat', icon: MessageSquare, active: currentPage === 'chat' },
-    { key: 'compare', label: 'Compare', icon: BarChart3, active: currentPage === 'compare' },
-    { key: 'admin', label: 'Admin', icon: Users, active: currentPage === 'admin' },
     { key: 'logout', label: 'Logout', icon: LogOut, active: false },
   ];
 
@@ -57,12 +53,6 @@ export default function App() {
       break;
     case 'chat':
       page = <ChatPage user={user} />;
-      break;
-    case 'compare':
-      page = <ComparisonPage user={user} />;
-      break;
-    case 'admin':
-      page = <AdminPage user={user} />;
       break;
     default:
       page = <DashboardPage user={user} />;

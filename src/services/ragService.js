@@ -222,7 +222,12 @@ class RAGService {
       let conversationHistory = conversationContext;
       recentMessages.forEach((msg, index) => {
         if (msg.userMessage && msg.botResponse) {
-          conversationHistory += `\n\n${index + 1}. ผู้ใช้: ${msg.userMessage}\n   ระบบ: ${msg.botResponse}`;
+          // Truncate long responses to prevent token overflow
+          const truncatedResponse = msg.botResponse.length > 500 
+            ? msg.botResponse.substring(0, 500) + '...' 
+            : msg.botResponse;
+          
+          conversationHistory += `\n\n${index + 1}. ผู้ใช้: ${msg.userMessage}\n   ระบบ: ${truncatedResponse}`;
         }
       });
       
@@ -282,7 +287,12 @@ class RAGService {
       
       contextData.similarChats.forEach((chat, index) => {
         const similarityPercent = (chat.similarity * 100).toFixed(1);
-        systemMessage += `\n\n${index + 1}. คำถาม: ${chat.userMessage}\n   คำตอบ: ${chat.botResponse}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
+        // Truncate long responses to prevent token overflow
+        const truncatedResponse = chat.botResponse.length > 500 
+          ? chat.botResponse.substring(0, 500) + '...' 
+          : chat.botResponse;
+        
+        systemMessage += `\n\n${index + 1}. คำถาม: ${chat.userMessage}\n   คำตอบ: ${truncatedResponse}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
       });
       
       const chatInstruction = language === 'thai' ? 

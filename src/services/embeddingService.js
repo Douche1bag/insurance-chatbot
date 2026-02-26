@@ -6,7 +6,7 @@ class EmbeddingService {
     this.baseUrl = process.env.VITE_API_BASE_URL;
   }
 
-  // Generate text embeddings using Typhoon API
+  // Generate text embeddings using Typhoon API (with fallback)
   async generateEmbedding(text) {
     try {
       const response = await fetch(`${this.baseUrl}/embeddings`, {
@@ -17,7 +17,7 @@ class EmbeddingService {
         },
         body: JSON.stringify({
           input: text,
-          model: "text-embedding-ada-002", // Check if Typhoon supports embeddings
+          model: "text-embedding-ada-002", 
           encoding_format: "float"
         })
       });
@@ -38,6 +38,12 @@ class EmbeddingService {
 
   // Fallback: Generate a simple numeric representation (384 dims to match system docs)
   generateSimpleEmbedding(text, dimensions = 384) {
+    // Safety check for undefined/null text
+    if (!text || typeof text !== 'string') {
+      console.warn('⚠️ Invalid text for embedding, using empty string');
+      text = '';
+    }
+    
     const embedding = new Array(dimensions).fill(0);
     
     // Simple hash-based embedding

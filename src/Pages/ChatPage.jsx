@@ -23,8 +23,8 @@ export default function ChatPage({ user }) {
       if (result.success && result.history) {
         // Convert MongoDB history to message format
         const formattedMessages = result.history.flatMap(record => [
-          { role: 'user', content: record.message },
-          { role: 'assistant', content: record.response }
+          { role: 'user', content: record.userMessage || record.message },
+          { role: 'assistant', content: record.botResponse || record.response }
         ]);
         setMessages(formattedMessages);
       }
