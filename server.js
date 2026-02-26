@@ -546,6 +546,99 @@ app.post('/api/test-rag', async (req, res) => {
   }
 });
 
+// Batch upload multiple documents
+app.post('/api/upload/batch', upload.array('files', 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, error: 'No files uploaded' });
+    }
+
+    const userId = req.body.userId || 'guest';
+    const results = [];
+
+    console.log(`📦 Batch upload: ${req.files.length} files for user: ${userId}`);
+
+    for (const file of req.files) {
+      const filePath = file.path;
+      const fileName = file.originalname;
+
+      try {
+        console.log(`\n📄 Processing: ${fileName}`);
+
+        // Step 1: OCR
+        const extractedText = await extractTextFromFile(filePath, fileName);
+
+        // Step 2: Embedding
+        const embedding = await embeddingService.generateEmbedding(extractedText);
+
+        // Step 3: Store
+        const documentId = await mongoService.storeUserDocument(
+          userId, fileName, extractedText, embedding,
+          {
+            originalName: fileName,
+            mimeType: file.mimetype,
+            size: file.size,
+            uploadedAt: new Date(),
+            source: 'user_upload'
+          }
+        );
+
+        // Step 4: Verify
+        const verification = await mongoService.verifyDocumentWithEmbedding(documentId, 'user_documents');
+
+        // Cleanup
+        fs.unlinkSync(filePath);
+
+        results.push({
+          fileName,
+          success: true,
+          documentId,
+          textLength: extractedText.length,
+          embeddingDimensions: embedding.length,
+          verification
+        });
+
+        console.log(`✅ Done: ${fileName}`);
+
+      } catch (fileError) {
+        console.error(`❌ Failed: ${fileName}`, fileError.message);
+
+        // Cleanup on error
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+        results.push({
+          fileName,
+          success: false,
+          error: fileError.message
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    console.log(`\n📊 Batch complete: ${successCount}/${req.files.length} succeeded`);
+
+    res.json({
+      success: true,
+      total: req.files.length,
+      successCount,
+      errorCount: req.files.length - successCount,
+      results
+    });
+
+  } catch (error) {
+    console.error('❌ Batch upload error:', error);
+
+    // Cleanup all files on catastrophic error
+    if (req.files) {
+      req.files.forEach(f => {
+        if (fs.existsSync(f.path)) fs.unlinkSync(f.path);
+      });
+    }
+
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Start server
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
