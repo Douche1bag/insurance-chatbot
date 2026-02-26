@@ -274,6 +274,37 @@ app.get('/api/documents', async (req, res) => {
   }
 });
 
+// Get user documents for dashboard
+app.get('/api/documents/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const limit = parseInt(req.query.limit) || 20;
+    
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User ID is required' 
+      });
+    }
+    
+    console.log(`📄 Fetching documents for user: ${userId}`);
+    const documents = await mongoService.getUserDocuments(userId, limit);
+    console.log(`📄 Found ${documents.length} documents`);
+    
+    res.json({ 
+      success: true, 
+      data: documents,
+      count: documents.length 
+    });
+  } catch (error) {
+    console.error('Error fetching user documents:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
 // OCR function using OpenTyphoon API
 async function extractTextFromFile(filePath, fileName) {
   const apiKey = process.env.TYPHOON_API_KEY;
