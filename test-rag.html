@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ทดสอบ RAG - ตรวจสอบการค้นหาเอกสาร</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1e40af;
+            margin-bottom: 10px;
+        }
+        .info {
+            background: #eff6ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #3b82f6;
+        }
+        .test-form {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        input, button {
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            font-size: 14px;
+            margin: 5px;
+        }
+        input {
+            flex: 1;
+            min-width: 300px;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            cursor: pointer;
+            border: none;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f9fafb;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+        .result-title {
+            font-weight: bold;
+            color: #1f2937;
+            margin-bottom: 8px;
+        }
+        .similarity {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .source-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-left: 8px;
+        }
+        .user-source {
+            background: #8b5cf6;
+            color: white;
+        }
+        .system-source {
+            background: #06b6d4;
+            color: white;
+        }
+        .preview {
+            color: #6b7280;
+            font-size: 13px;
+            margin-top: 8px;
+            font-style: italic;
+        }
+        .summary {
+            background: #fef3c7;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #fbbf24;
+            margin-bottom: 20px;
+        }
+        .error {
+            background: #fee2e2;
+            border: 1px solid #ef4444;
+            color: #991b1b;
+        }
+        .success {
+            background: #d1fae5;
+            border: 1px solid #10b981;
+            color: #065f46;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 ทดสอบ RAG - ระบบค้นหาเอกสาร</h1>
+        
+        <div class="info">
+            <strong>📌 วิธีใช้งาน:</strong><br>
+            1. ใส่ User ID (ใช้ค่าเดียวกับที่ login เช่น เลข ID จาก MongoDB)<br>
+            2. พิมพ์คำถามที่ต้องการทดสอบ<br>
+            3. กดปุ่มค้นหา - ระบบจะค้นหาจากเอกสารของคุณก่อน แล้วค่อยค้นหาจากระบบ<br>
+            4. ดูผลลัพธ์และค่า Similarity Score
+        </div>
+
+        <div class="test-form">
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <input 
+                    type="text" 
+                    id="userIdInput" 
+                    placeholder="User ID (เช่น 673f2a3b4c5d6e7f8a9b0c1d)"
+                >
+                <button onclick="getUserFromStorage()">📋 ดึงจาก localStorage</button>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <input 
+                    type="text" 
+                    id="queryInput" 
+                    placeholder="พิมพ์คำถาม เช่น 'ความคุ้มครองกรมธรรม์อุบัติเหตุ'"
+                    onkeypress="if(event.key==='Enter') testRAG()"
+                >
+                <button onclick="testRAG()" id="searchBtn">🔍 ค้นหา</button>
+            </div>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3001/api';
+
+        function getUserFromStorage() {
+            const user = localStorage.getItem('user');
+            if (user) {
+                try {
+                    const userData = JSON.parse(user);
+                    document.getElementById('userIdInput').value = userData.id;
+                    alert(`✅ พบข้อมูลผู้ใช้: ${userData.name} (${userData.email})`);
+                } catch (error) {
+                    alert('❌ ไม่สามารถอ่านข้อมูลผู้ใช้ได้');
+                }
+            } else {
+                alert('❌ ไม่พบข้อมูลผู้ใช้ใน localStorage กรุณา login ก่อน');
+            }
+        }
+
+        async function testRAG() {
+            const userId = document.getElementById('userIdInput').value.trim();
+            const query = document.getElementById('queryInput').value.trim();
+            const resultsDiv = document.getElementById('results');
+            const searchBtn = document.getElementById('searchBtn');
+
+            if (!query) {
+                alert('❌ กรุณาพิมพ์คำถาม');
+                return;
+            }
+
+            searchBtn.disabled = true;
+            searchBtn.textContent = '⏳ กำลังค้นหา...';
+            resultsDiv.innerHTML = '<p>🔄 กำลังประมวลผล...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/test-rag`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, userId })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    displayResults(result);
+                } else {
+                    resultsDiv.innerHTML = `<div class="result error">❌ Error: ${result.error}</div>`;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="result error">❌ เกิดข้อผิดพลาด: ${error.message}</div>`;
+            } finally {
+                searchBtn.disabled = false;
+                searchBtn.textContent = '🔍 ค้นหา';
+            }
+        }
+
+        function displayResults(result) {
+            const { query, userId, results, summary } = result;
+            
+            let html = `
+                <div class="summary ${summary.totalRelevantDocs > 0 ? 'success' : ''}">
+                    <strong>📊 สรุปผลการค้นหา</strong><br>
+                    คำค้น: <strong>"${query}"</strong><br>
+                    User ID: <strong>${userId || 'ไม่ระบุ'}</strong><br>
+                    เอกสารที่เกี่ยวข้อง: <strong>${summary.totalRelevantDocs}</strong> เอกสาร
+                    (${summary.userDocumentsFound} จากเอกสารของคุณ, ${summary.systemDocumentsFound} จากระบบ)
+                </div>
+            `;
+
+            // User documents
+            if (results.userDocuments && results.userDocuments.length > 0) {
+                html += '<h2 style="color: #8b5cf6; margin-top: 20px;">👤 เอกสารของคุณ</h2>';
+                results.userDocuments.forEach((doc, index) => {
+                    html += `
+                        <div class="result">
+                            <div class="result-title">
+                                ${index + 1}. ${doc.title}
+                                <span class="similarity">${doc.similarity}</span>
+                                <span class="source-badge user-source">เอกสารของคุณ</span>
+                            </div>
+                            <div class="preview">${doc.contentPreview}</div>
+                        </div>
+                    `;
+                });
+            } else if (userId) {
+                html += '<div class="result error">❌ ไม่พบเอกสารของคุณที่เกี่ยวข้อง (ลองอัปโหลดเอกสารก่อน)</div>';
+            }
+
+            // System documents
+            if (results.systemDocuments && results.systemDocuments.length > 0) {
+                html += '<h2 style="color: #06b6d4; margin-top: 20px;">🏛️ เอกสารระบบ</h2>';
+                results.systemDocuments.forEach((doc, index) => {
+                    html += `
+                        <div class="result">
+                            <div class="result-title">
+                                ${index + 1}. ${doc.title}
+                                <span class="similarity">${doc.similarity}</span>
+                                <span class="source-badge system-source">ระบบ</span>
+                            </div>
+                            <div class="preview">${doc.contentPreview}</div>
+                        </div>
+                    `;
+                });
+            }
+
+            if (summary.totalRelevantDocs === 0) {
+                html += '<div class="result error">❌ ไม่พบเอกสารที่เกี่ยวข้องกับคำค้นนี้</div>';
+            }
+
+            document.getElementById('results').innerHTML = html;
+        }
+
+        // Auto-load user if logged in
+        window.addEventListener('load', () => {
+            const user = localStorage.getItem('user');
+            if (user) {
+                try {
+                    const userData = JSON.parse(user);
+                    document.getElementById('userIdInput').value = userData.id;
+                } catch (error) {
+                    console.error('Error loading user:', error);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
