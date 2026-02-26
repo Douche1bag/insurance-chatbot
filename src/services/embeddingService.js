@@ -203,7 +203,6 @@ class EmbeddingService {
   async findSimilarUserContent(query, userId, limit = 5) {
     try {
       console.log(`🔍 Searching user documents for userId: ${userId}`);
-      const queryEmbedding = await this.generateEmbedding(query);
       
       const db = await mongoService.connect();
       const collection = db.collection('user_documents');
@@ -214,6 +213,31 @@ class EmbeddingService {
       if (userDocuments.length === 0) {
         return [];
       }
+      
+      // Check if query contains a policy number
+      const policyNumberMatch = query.match(/(\d{7,10})/);
+      if (policyNumberMatch) {
+        const policyNumber = policyNumberMatch[1];
+        console.log(`🎯 Detected policy number in query: ${policyNumber}`);
+        
+        // Try exact match first
+        const exactMatches = userDocuments.filter(doc => 
+          doc.content && doc.content.includes(policyNumber)
+        );
+        
+        if (exactMatches.length > 0) {
+          console.log(`✅ Found ${exactMatches.length} exact matches for policy ${policyNumber}`);
+          return exactMatches.map(doc => ({
+            ...doc,
+            similarity: 1.0, // Perfect match
+            score: 1.0,
+            source: 'user_upload'
+          })).slice(0, limit);
+        }
+      }
+      
+      // Fall back to embedding similarity search
+      const queryEmbedding = await this.generateEmbedding(query);
       
       const similarities = userDocuments
         .filter(doc => doc.embedding && Array.isArray(doc.embedding))

@@ -9,6 +9,21 @@ class RAGService {
   }
 
   /**
+   * Clean response formatting: remove ### headers and convert ** to ""
+   */
+  cleanResponseFormatting(text) {
+    if (!text) return text;
+    
+    // Remove ### markdown headers
+    let cleaned = text.replace(/###\s*/g, '');
+    
+    // Convert **bold** to ""quoted""
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '"$1"');
+    
+    return cleaned;
+  }
+
+  /**
    * Main RAG workflow: Retrieve relevant context and generate response
    * Now supports prioritized data (user documents first, then system documents)
    */
@@ -46,11 +61,14 @@ class RAGService {
       // Step 2: Generate response using retrieved context + conversation history
       const response = await this.generateRAGResponse(userQuery, contextData, language, recentMessages);
       
+      // Clean response formatting
+      const cleanedResponse = this.cleanResponseFormatting(response.message);
+      
       // Step 3: Return complete RAG result
       return {
         success: true,
         query: userQuery,
-        response: response.message,
+        response: cleanedResponse,
         context: contextData.context,
         metadata: {
           contextFound: contextData.context.length > 0,
@@ -67,7 +85,7 @@ class RAGService {
         success: false,
         query: userQuery,
         error: error.message,
-        fallbackResponse: await this.generateFallbackResponse(userQuery, language)
+        fallbackResponse: this.cleanResponseFormatting(await this.generateFallbackResponse(userQuery, language))
       };
     }
   }
