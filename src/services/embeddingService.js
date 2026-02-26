@@ -23,13 +23,14 @@ class EmbeddingService {
       });
 
       if (!response.ok) {
-        throw new Error(`Embedding API error: ${response.status}`);
+        console.log(`⚠️ Embedding API unavailable (${response.status}), using fallback method`);
+        return this.generateSimpleEmbedding(text);
       }
 
       const data = await response.json();
       return data.data[0].embedding;
     } catch (error) {
-      console.error('❌ Error generating embedding:', error.message);
+      console.log(`⚠️ Embedding API error (${error.message}), using fallback method`);
       // Fallback to a simple hash-based embedding for demo purposes
       return this.generateSimpleEmbedding(text);
     }
@@ -233,6 +234,83 @@ class EmbeddingService {
       return sortedResults;
     } catch (error) {
       console.error('❌ Error finding similar user content:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Search for similar chat history using semantic similarity
+   * Useful for finding relevant past conversations
+   */
+  async findSimilarChatHistory(query, userId, limit = 5) {
+    try {
+      console.log(`💬 Searching chat history for: "${query}"`);
+      const queryEmbedding = await this.generateEmbedding(query);
+      
+      const db = await mongoService.connect();
+      const collection = db.collection('chat_history');
+      
+      // Get all chat history for this user that has embeddings
+      const chatHistory = await collection.find({ 
+        userId,
+        $or: [
+          { messageEmbedding: { $exists: true, $ne: null } },
+          { responseEmbedding: { $exists: true, $ne: null } }
+        ]
+      }).toArray();
+      
+      console.log(`📄 Found ${chatHistory.length} chat messages with embeddings`);
+      
+      if (chatHistory.length === 0) {
+        return [];
+      }
+      
+      const similarities = chatHistory.map(chat => {
+        let maxSimilarity = 0;
+        let matchedContent = '';
+        let matchedType = '';
+        
+        // Check similarity with user message
+        if (chat.messageEmbedding && Array.isArray(chat.messageEmbedding)) {
+          const msgSimilarity = this.cosineSimilarity(queryEmbedding, chat.messageEmbedding);
+          if (msgSimilarity > maxSimilarity) {
+            maxSimilarity = msgSimilarity;
+            matchedContent = chat.userMessage;
+            matchedType = 'user_message';
+          }
+        }
+        
+        // Check similarity with bot response
+        if (chat.responseEmbedding && Array.isArray(chat.responseEmbedding)) {
+          const resSimilarity = this.cosineSimilarity(queryEmbedding, chat.responseEmbedding);
+          if (resSimilarity > maxSimilarity) {
+            maxSimilarity = resSimilarity;
+            matchedContent = chat.botResponse;
+            matchedType = 'bot_response';
+          }
+        }
+        
+        return {
+          userMessage: chat.userMessage,
+          botResponse: chat.botResponse,
+          timestamp: chat.timestamp,
+          similarity: maxSimilarity,
+          matchedContent,
+          matchedType
+        };
+      })
+      .filter(chat => chat.similarity > 0.3) // Minimum threshold
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
+      
+      console.log(`✅ Chat history search completed, returning ${similarities.length} results`);
+      if (similarities.length > 0) {
+        console.log(`🎯 Top chat scores: ${similarities.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+      }
+      
+      return similarities;
+    } catch (error) {
+      console.error('❌ Error searching chat history:', error.message);
       return [];
     }
   }

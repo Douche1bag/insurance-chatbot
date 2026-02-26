@@ -1,5 +1,5 @@
 // src/Pages/ChatPage.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import '../Styles/App.css';
 
 export default function ChatPage({ user }) {
@@ -7,6 +7,31 @@ export default function ChatPage({ user }) {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [lastContext, setLastContext] = useState(null);
+
+  // Load chat history on mount
+  useEffect(() => {
+    if (user?.id) {
+      loadChatHistory();
+    }
+  }, [user?.id]);
+
+  const loadChatHistory = async () => {
+    try {
+      const response = await fetch(`/api/chat/history/${user.id}?limit=50`);
+      const result = await response.json();
+      
+      if (result.success && result.history) {
+        // Convert MongoDB history to message format
+        const formattedMessages = result.history.flatMap(record => [
+          { role: 'user', content: record.message },
+          { role: 'assistant', content: record.response }
+        ]);
+        setMessages(formattedMessages);
+      }
+    } catch (error) {
+      console.error('Failed to load chat history:', error);
+    }
+  };
 
   const handleSend = async () => {
     if (!input.trim() || loading) return;

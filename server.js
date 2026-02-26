@@ -133,15 +133,69 @@ app.post('/api/chat', async (req, res) => {
     
     console.log(`💬 Chat query: "${query}" from user: ${userId || 'guest'}`);
     
+    // Get recent chat history for context
+    let recentMessages = [];
+    if (userId) {
+      try {
+        const history = await mongoService.getChatHistory(userId, 5);
+        recentMessages = history.slice(-3); // Last 3 conversations
+      } catch (historyError) {
+        console.log('⚠️ Could not load chat history:', historyError.message);
+      }
+    }
+    
     const result = await ragService.queryWithRAG(query, {
       contextLimit: 3,
       language: 'thai',
-      userId: userId || null
+      userId: userId || null,
+      recentMessages // Pass conversation context
     });
+    
+    // Store chat history with embeddings in MongoDB
+    if (result.success && userId) {
+      try {
+        const embeddingService = (await import('./src/services/embeddingService.js')).default;
+        
+        // Generate embeddings for both message and response
+        const messageEmbedding = await embeddingService.generateEmbedding(query);
+        const responseEmbedding = await embeddingService.generateEmbedding(result.response);
+        
+        await mongoService.storeChatMessage(userId, query, result.response, {
+          messageEmbedding,
+          responseEmbedding
+        });
+        console.log('✅ Chat history saved with embeddings');
+      } catch (saveError) {
+        console.error('⚠️ Failed to save chat history:', saveError.message);
+        // Fallback: save without embeddings
+        await mongoService.storeChatMessage(userId, query, result.response);
+      }
+    }
     
     res.json(result);
   } catch (error) {
     console.error('Chat error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// Get chat history endpoint
+app.get('/api/chat/history/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const limit = parseInt(req.query.limit) || 50;
+    
+    const history = await mongoService.getChatHistory(userId, limit);
+    
+    res.json({ 
+      success: true, 
+      history 
+    });
+  } catch (error) {
+    console.error('Chat history error:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 

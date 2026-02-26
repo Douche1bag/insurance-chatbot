@@ -60,21 +60,23 @@ class MongoService {
   }
 
   // Store chat conversation with vector embeddings
-  async storeChatMessage(userId, message, response, embedding = null) {
+  async storeChatMessage(userId, userMessage, botResponse, embeddings = {}) {
     try {
       const db = await this.connect();
       const collection = db.collection('chat_history');
 
       const chatRecord = {
         userId,
-        message,
-        response,
-        embedding, // Store vector embeddings here
+        userMessage,
+        botResponse,
+        messageEmbedding: embeddings.messageEmbedding || null,
+        responseEmbedding: embeddings.responseEmbedding || null,
         timestamp: new Date(),
         metadata: {
           model: process.env.VITE_MODEL_NAME,
-          messageLength: message.length,
-          responseLength: response.length
+          messageLength: userMessage.length,
+          responseLength: botResponse.length,
+          hasEmbeddings: !!(embeddings.messageEmbedding && embeddings.responseEmbedding)
         }
       };
 
