@@ -5,7 +5,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import ChatHeader from '../components/ChatHeader';
 
-export default function UploadPage() {
+export default function UploadPage({ user }) {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [file, setFile] = useState(null);
@@ -34,18 +34,64 @@ export default function UploadPage() {
     }
   };
 
-  const startUpload = () => {
+  const startUpload = async () => {
+    if (!file) {
+      alert('กรุณาเลือกไฟล์');
+      return;
+    }
+
     setUploading(true);
     setProgress(0);
-    let p = 0;
-    const interval = setInterval(() => {
-      p += 10;
-      setProgress(p);
-      if (p >= 100) {
-        clearInterval(interval);
-        setUploading(false);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('userId', user?.id || 'guest');
+
+      // Simulate progress
+      const progressInterval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 90) return prev;
+          return prev + 10;
+        });
+      }, 300);
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      clearInterval(progressInterval);
+      setProgress(100);
+
+      const result = await response.json();
+
+      if (result.success) {
+        const { data } = result;
+        const verificationMsg = data.verification?.success 
+          ? `✅ ยืนยันการจัดเก็บใน Vector Database\n📊 Collection: ${data.collection}\n🔢 Embedding Dimensions: ${data.verification.embeddingDimensions}\n📝 Content Length: ${data.verification.contentLength} ตัวอักษร`
+          : '⚠️ ไม่สามารถยืนยันการจัดเก็บได้';
+        
+        alert(`✅ อัปโหลดสำเร็จ!\n\n` +
+              `📄 ไฟล์: ${data.fileName}\n` +
+              `👤 User: ${data.userId}\n` +
+              `📝 ข้อความที่สกัด: ${data.textLength} ตัวอักษร\n` +
+              `🔢 เวกเตอร์: ${data.embeddingDimensions} มิติ\n` +
+              `💾 Collection: ${data.collection}\n\n` +
+              `${verificationMsg}`);
+        setFile(null);
+        setProgress(0);
+      } else {
+        throw new Error(result.error || 'Upload failed');
       }
-    }, 200);
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('❌ เกิดข้อผิดพลาด: ' + error.message);
+      setProgress(0);
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (

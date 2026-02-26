@@ -1,35 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import MainLayout from './layout/MainLayout';
 import LoginPage from './Pages/LoginPage';
 import DashboardPage from './Pages/DashboardPage';
 import UploadPage from './Pages/UploadPage';
 import ChatPage from './Pages/ChatPage';
-import ComparisonPage from './Pages/ComparisonPage';
-import AdminPage from './Pages/AdminPage';
 import { LayoutDashboard, Upload, MessageSquare, BarChart3, Users, LogOut } from 'lucide-react';
 import './Styles/App.css';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('chat');
-  const [isLoggedIn, setIsLoggedIn] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
+
+  const handleLogin = (userData) => {
+    setUser(userData);
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    setUser(null);
+    setIsLoggedIn(false);
+    setCurrentPage('chat');
+  };
 
   if (!isLoggedIn) {
-    return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
+    return <LoginPage onLogin={handleLogin} />;
   }
 
   const menuItems = [
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, active: currentPage === 'dashboard' },
     { key: 'upload', label: 'Upload', icon: Upload, active: currentPage === 'upload' },
     { key: 'chat', label: 'AI Chat', icon: MessageSquare, active: currentPage === 'chat' },
-    { key: 'compare', label: 'Compare', icon: BarChart3, active: currentPage === 'compare' },
-    { key: 'admin', label: 'Admin', icon: Users, active: currentPage === 'admin' },
     { key: 'logout', label: 'Logout', icon: LogOut, active: false },
   ];
 
   const handleMenuClick = (key) => {
     if (key === 'logout') {
-      setIsLoggedIn(false);
-      setCurrentPage('dashboard');
+      handleLogout();
     } else {
       setCurrentPage(key);
     }
@@ -38,22 +46,16 @@ export default function App() {
   let page = null;
   switch (currentPage) {
     case 'dashboard':
-      page = <DashboardPage />;
+      page = <DashboardPage user={user} />;
       break;
     case 'upload':
-      page = <UploadPage />;
+      page = <UploadPage user={user} />;
       break;
     case 'chat':
-      page = <ChatPage />;
-      break;
-    case 'compare':
-      page = <ComparisonPage />;
-      break;
-    case 'admin':
-      page = <AdminPage />;
+      page = <ChatPage user={user} />;
       break;
     default:
-      page = <DashboardPage />;
+      page = <DashboardPage user={user} />;
   }
 
   return (

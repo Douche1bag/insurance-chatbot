@@ -9,33 +9,72 @@ class RAGService {
   }
 
   /**
+   * Clean response formatting: remove ### headers and convert ** to ""
+   */
+  cleanResponseFormatting(text) {
+    if (!text) return text;
+    
+    // Remove ### markdown headers
+    let cleaned = text.replace(/###\s*/g, '');
+    
+    // Convert **bold** to ""quoted""
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '"$1"');
+    
+    return cleaned;
+  }
+
+  /**
    * Main RAG workflow: Retrieve relevant context and generate response
+   * Now supports prioritized data (user documents first, then system documents)
    */
   async queryWithRAG(userQuery, options = {}) {
     const {
       contextLimit = this.defaultContextLimit,
       includeScore = true,
-      language = 'thai'
+      language = 'thai',
+      userId = null, // Add user ID for prioritized search
+      recentMessages = [] // Conversation history for context
     } = options;
 
     try {
       console.log('🔍 Starting RAG workflow for query:', userQuery);
       
-      // Step 1: Retrieve relevant context from vector database
-      const contextData = await this.retrieveContext(userQuery, contextLimit);
+      // Optional: Search for semantically similar past conversations
+      let similarPastChats = [];
+      if (userId) {
+        try {
+          similarPastChats = await embeddingService.findSimilarChatHistory(userQuery, userId, 2);
+          if (similarPastChats.length > 0) {
+            console.log(`💭 Found ${similarPastChats.length} similar past conversations`);
+          }
+        } catch (chatSearchError) {
+          console.log('⚠️ Could not search chat history:', chatSearchError.message);
+        }
+      }
       
-      // Step 2: Generate response using retrieved context
-      const response = await this.generateRAGResponse(userQuery, contextData, language);
+      // Step 1: Retrieve relevant context with priority (user docs first)
+      const contextData = await this.retrievePrioritizedContext(userQuery, contextLimit, userId);
+      
+      // Add similar past chats to context data
+      contextData.similarChats = similarPastChats;
+      
+      // Step 2: Generate response using retrieved context + conversation history
+      const response = await this.generateRAGResponse(userQuery, contextData, language, recentMessages);
+      
+      // Clean response formatting
+      const cleanedResponse = this.cleanResponseFormatting(response.message);
       
       // Step 3: Return complete RAG result
       return {
         success: true,
         query: userQuery,
-        response: response.message,
+        response: cleanedResponse,
         context: contextData.context,
         metadata: {
           contextFound: contextData.context.length > 0,
           contextCount: contextData.context.length,
+          userContextCount: contextData.userContextCount || 0,
+          systemContextCount: contextData.systemContextCount || 0,
           avgSimilarity: this.calculateAverageScore(contextData.context),
           timestamp: new Date()
         }
@@ -46,13 +85,90 @@ class RAGService {
         success: false,
         query: userQuery,
         error: error.message,
-        fallbackResponse: await this.generateFallbackResponse(userQuery, language)
+        fallbackResponse: this.cleanResponseFormatting(await this.generateFallbackResponse(userQuery, language))
       };
     }
   }
 
   /**
-   * Retrieve relevant context from vector database
+   * Retrieve prioritized context (user documents first, then system documents)
+   */
+  async retrievePrioritizedContext(query, limit = 3, userId = null) {
+    try {
+      let userDocs = [];
+      let systemDocs = [];
+      let userContextCount = 0;
+      let systemContextCount = 0;
+      
+      // Priority 1: Search user documents if userId provided
+      if (userId) {
+        try {
+          const userSimilar = await embeddingService.findSimilarUserContent(query, userId, limit);
+          const relevantUserDocs = userSimilar.filter(doc => {
+            const score = doc.similarity || doc.score || 0;
+            return score >= this.similarityThreshold;
+          });
+          userDocs = relevantUserDocs.slice(0, limit);
+          userContextCount = userDocs.length;
+          console.log(`👤 Found ${userContextCount} relevant user documents`);
+        } catch (userError) {
+          console.log('🔍 No user documents found, proceeding to system docs');
+        }
+      }
+      
+      // Priority 2: Search system documents if we need more context
+      const remaining = Math.max(0, limit - userDocs.length);
+      if (remaining > 0) {
+        try {
+          const systemSimilar = await embeddingService.findSimilarContent(query, remaining * 2);
+          const relevantSystemDocs = systemSimilar.filter(doc => {
+            const score = doc.similarity || doc.score || 0;
+            return score >= this.similarityThreshold;
+          });
+          systemDocs = relevantSystemDocs.slice(0, remaining);
+          systemContextCount = systemDocs.length;
+          console.log(`🏛️ Found ${systemContextCount} relevant system documents`);
+        } catch (systemError) {
+          console.error('❌ Error searching system documents:', systemError.message);
+        }
+      }
+      
+      // Combine user docs (priority) + system docs (fallback)
+      const allDocs = [...userDocs, ...systemDocs];
+      
+      // Prepare context with content truncation and source marking
+      const contextDocs = allDocs.map(doc => ({
+        title: doc.title || 'เอกสาร',
+        content: this.truncateContent(doc.content, 500),
+        similarity: doc.similarity || doc.score || 0,
+        id: doc._id || doc.id,
+        source: doc.userId ? 'user' : 'system', // Mark document source
+        sourceIcon: doc.userId ? '👤' : '🏛️'
+      }));
+      
+      console.log(`📄 Retrieved ${contextDocs.length} total documents (${userContextCount} user + ${systemContextCount} system)`);
+      
+      return {
+        context: contextDocs,
+        userContextCount,
+        systemContextCount,
+        totalFound: allDocs.length,
+        query: query
+      };
+    } catch (error) {
+      console.error('❌ Error retrieving prioritized context:', error.message);
+      return { 
+        context: [], 
+        userContextCount: 0,
+        systemContextCount: 0,
+        totalFound: 0, 
+        query 
+      };
+    }
+  }
+
+  /**
+   * Retrieve relevant context from vector database (legacy method)
    */
   async retrieveContext(query, limit = 3) {
     try {
@@ -92,9 +208,9 @@ class RAGService {
   /**
    * Generate response using RAG context
    */
-  async generateRAGResponse(query, contextData, language = 'thai') {
+  async generateRAGResponse(query, contextData, language = 'thai', recentMessages = []) {
     try {
-      const systemMessage = this.buildSystemMessage(contextData, language);
+      const systemMessage = this.buildSystemMessage(contextData, language, recentMessages);
       
       const messagesForAPI = [
         { role: 'system', content: systemMessage },
@@ -112,21 +228,48 @@ class RAGService {
   /**
    * Build system message with retrieved context
    */
-  buildSystemMessage(contextData, language = 'thai') {
+  buildSystemMessage(contextData, language = 'thai', recentMessages = []) {
     let systemMessage;
     
+    // Add conversation context if available
+    if (recentMessages && recentMessages.length > 0) {
+      const conversationContext = language === 'thai' ? 
+        '\n\n💬 บทสนทนาที่ผ่านมา:' : 
+        '\n\n💬 Recent Conversation:';
+      
+      let conversationHistory = conversationContext;
+      recentMessages.forEach((msg, index) => {
+        if (msg.userMessage && msg.botResponse) {
+          // Truncate long responses to prevent token overflow
+          const truncatedResponse = msg.botResponse.length > 500 
+            ? msg.botResponse.substring(0, 500) + '...' 
+            : msg.botResponse;
+          
+          conversationHistory += `\n\n${index + 1}. ผู้ใช้: ${msg.userMessage}\n   ระบบ: ${truncatedResponse}`;
+        }
+      });
+      
+      const contextInstruction = language === 'thai' ? 
+        '\n\n⚠️ สำคัญ: กรุณาอ้างอิงบริบทจากบทสนทนาก่อนหน้านี้ในการตอบคำถามปัจจุบัน หากผู้ใช้ถามถึงข้อมูลที่เคยพูดคุยไปแล้ว ให้ตอบโดยอิงจากประวัติการสนทนา' :
+        '\n\n⚠️ Important: Please reference context from previous conversation when answering current question. If the user refers to previously discussed information, respond based on conversation history';
+      
+      systemMessage = conversationHistory + contextInstruction + '\n\n---\n';
+    } else {
+      systemMessage = '';
+    }
+    
     if (language === 'thai') {
-      systemMessage = `คุณเป็นผู้ช่วยด้านประกันภัยไทยที่มีความเชี่ยวชาญ กรุณาตอบคำถามโดยใช้ข้อมูลที่เกี่ยวข้องนี้:
+      systemMessage += `คุณเป็นผู้ช่วยด้านประกันภัยไทยที่มีความเชี่ยวชาญ กรุณาตอบคำถามโดยใช้ข้อมูลที่เกี่ยวข้องนี้:
 
-📋 หลักการตอบคำถาม:
+ หลักการตอบคำถาม:
 1. ใช้ข้อมูลจากแหล่งที่เชื่อถือได้เป็นหลัก
 2. อธิบายอย่างชัดเจนและเข้าใจง่าย
 3. ระบุแหล่งข้อมูลที่ใช้
 4. หากไม่แน่ใจ ให้แนะนำติดต่อผู้เชี่ยวชาญ`;
     } else {
-      systemMessage = `You are a knowledgeable Thai insurance assistant. Please answer questions using the following relevant information:
+      systemMessage += `You are a knowledgeable Thai insurance assistant. Please answer questions using the following relevant information:
 
-📋 Response Guidelines:
+ Response Guidelines:
 1. Use information from reliable sources as the primary basis
 2. Explain clearly and simply
 3. Cite sources used
@@ -146,14 +289,41 @@ class RAGService {
       });
       
       const instruction = language === 'thai' ? 
-        '\n\n⚠️ คำแนะนำ: กรุณาอ้างอิงข้อมูลข้างต้นในการตอบ และระบุแหล่งข้อมูลที่ใช้' :
-        '\n\n⚠️ Instructions: Please reference the above information in your response and cite the sources used';
+        '\n\n คำแนะนำ: กรุณาอ้างอิงข้อมูลข้างต้นในการตอบ และระบุแหล่งข้อมูลที่ใช้' :
+        '\n\n Instructions: Please reference the above information in your response and cite the sources used';
       
       systemMessage += instruction;
-    } else {
+    }
+    
+    // Add similar past conversations if available
+    if (contextData.similarChats && contextData.similarChats.length > 0) {
+      const similarChatsSection = language === 'thai' ? 
+        '\n\n🔍 บทสนทนาที่คล้ายกันในอดีต:' : 
+        '\n\n🔍 Similar Past Conversations:';
+      
+      systemMessage += similarChatsSection;
+      
+      contextData.similarChats.forEach((chat, index) => {
+        const similarityPercent = (chat.similarity * 100).toFixed(1);
+        // Truncate long responses to prevent token overflow
+        const truncatedResponse = chat.botResponse.length > 500 
+          ? chat.botResponse.substring(0, 500) + '...' 
+          : chat.botResponse;
+        
+        systemMessage += `\n\n${index + 1}. คำถาม: ${chat.userMessage}\n   คำตอบ: ${truncatedResponse}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
+      });
+      
+      const chatInstruction = language === 'thai' ? 
+        '\n\n ℹ️ หมายเหตุ: บทสนทนาที่คล้ายกันข้างต้นอาจให้บริบทเพิ่มเติม แต่ให้ตอบตามคำถามปัจจุบันเป็นหลัก' :
+        '\n\n ℹ️ Note: The similar conversations above may provide additional context, but prioritize answering the current question';
+      
+      systemMessage += chatInstruction;
+    }
+    
+    if ((contextData.context && contextData.context.length === 0) && (!contextData.similarChats || contextData.similarChats.length === 0)) {
       const noDataMessage = language === 'thai' ? 
-        '\n\n⚠️ ไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญสำหรับข้อมูลที่แม่นยำ' :
-        '\n\n⚠️ No relevant information found in database. Please answer based on general insurance knowledge and recommend consulting an expert for accurate information';
+        '\n\n ไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญสำหรับข้อมูลที่แม่นยำ' :
+        '\n\n No relevant information found in database. Please answer based on general insurance knowledge and recommend consulting an expert for accurate information';
       
       systemMessage += noDataMessage;
     }
@@ -257,3 +427,4 @@ class RAGService {
 }
 
 export default new RAGService();
+

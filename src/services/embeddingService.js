@@ -6,7 +6,7 @@ class EmbeddingService {
     this.baseUrl = process.env.VITE_API_BASE_URL;
   }
 
-  // Generate text embeddings using Typhoon API
+  // Generate text embeddings using Typhoon API (with fallback)
   async generateEmbedding(text) {
     try {
       const response = await fetch(`${this.baseUrl}/embeddings`, {
@@ -17,26 +17,33 @@ class EmbeddingService {
         },
         body: JSON.stringify({
           input: text,
-          model: "text-embedding-ada-002", // Check if Typhoon supports embeddings
+          model: "text-embedding-ada-002", 
           encoding_format: "float"
         })
       });
 
       if (!response.ok) {
-        throw new Error(`Embedding API error: ${response.status}`);
+        console.log(`⚠️ Embedding API unavailable (${response.status}), using fallback method`);
+        return this.generateSimpleEmbedding(text);
       }
 
       const data = await response.json();
       return data.data[0].embedding;
     } catch (error) {
-      console.error('❌ Error generating embedding:', error.message);
+      console.log(`⚠️ Embedding API error (${error.message}), using fallback method`);
       // Fallback to a simple hash-based embedding for demo purposes
       return this.generateSimpleEmbedding(text);
     }
   }
 
-  // Fallback: Generate a simple numeric representation (for demo)
-  generateSimpleEmbedding(text, dimensions = 128) {
+  // Fallback: Generate a simple numeric representation (384 dims to match system docs)
+  generateSimpleEmbedding(text, dimensions = 384) {
+    // Safety check for undefined/null text
+    if (!text || typeof text !== 'string') {
+      console.warn('⚠️ Invalid text for embedding, using empty string');
+      text = '';
+    }
+    
     const embedding = new Array(dimensions).fill(0);
     
     // Simple hash-based embedding
@@ -189,6 +196,152 @@ class EmbeddingService {
     } catch (error) {
       console.error('❌ Error getting relevant context:', error.message);
       return { context: [], query, timestamp: new Date() };
+    }
+  }
+
+  // Find similar content in USER documents
+  async findSimilarUserContent(query, userId, limit = 5) {
+    try {
+      console.log(`🔍 Searching user documents for userId: ${userId}`);
+      
+      const db = await mongoService.connect();
+      const collection = db.collection('user_documents');
+      
+      const userDocuments = await collection.find({ userId }).toArray();
+      console.log(`📄 Found ${userDocuments.length} user documents`);
+      
+      if (userDocuments.length === 0) {
+        return [];
+      }
+      
+      // Check if query contains a policy number
+      const policyNumberMatch = query.match(/(\d{7,10})/);
+      if (policyNumberMatch) {
+        const policyNumber = policyNumberMatch[1];
+        console.log(`🎯 Detected policy number in query: ${policyNumber}`);
+        
+        // Try exact match first
+        const exactMatches = userDocuments.filter(doc => 
+          doc.content && doc.content.includes(policyNumber)
+        );
+        
+        if (exactMatches.length > 0) {
+          console.log(`✅ Found ${exactMatches.length} exact matches for policy ${policyNumber}`);
+          return exactMatches.map(doc => ({
+            ...doc,
+            similarity: 1.0, // Perfect match
+            score: 1.0,
+            source: 'user_upload'
+          })).slice(0, limit);
+        }
+      }
+      
+      // Fall back to embedding similarity search
+      const queryEmbedding = await this.generateEmbedding(query);
+      
+      const similarities = userDocuments
+        .filter(doc => doc.embedding && Array.isArray(doc.embedding))
+        .map(doc => {
+          const similarity = this.cosineSimilarity(queryEmbedding, doc.embedding);
+          return {
+            ...doc,
+            similarity: similarity,
+            score: similarity,
+            source: 'user_upload'
+          };
+        })
+        .filter(doc => doc.similarity > 0);
+      
+      const sortedResults = similarities
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+      
+      console.log(`✅ User search completed, returning ${sortedResults.length} results`);
+      if (sortedResults.length > 0) {
+        console.log(`🎯 Top user doc scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+      }
+      
+      return sortedResults;
+    } catch (error) {
+      console.error('❌ Error finding similar user content:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Search for similar chat history using semantic similarity
+   * Useful for finding relevant past conversations
+   */
+  async findSimilarChatHistory(query, userId, limit = 5) {
+    try {
+      console.log(`💬 Searching chat history for: "${query}"`);
+      const queryEmbedding = await this.generateEmbedding(query);
+      
+      const db = await mongoService.connect();
+      const collection = db.collection('chat_history');
+      
+      // Get all chat history for this user that has embeddings
+      const chatHistory = await collection.find({ 
+        userId,
+        $or: [
+          { messageEmbedding: { $exists: true, $ne: null } },
+          { responseEmbedding: { $exists: true, $ne: null } }
+        ]
+      }).toArray();
+      
+      console.log(`📄 Found ${chatHistory.length} chat messages with embeddings`);
+      
+      if (chatHistory.length === 0) {
+        return [];
+      }
+      
+      const similarities = chatHistory.map(chat => {
+        let maxSimilarity = 0;
+        let matchedContent = '';
+        let matchedType = '';
+        
+        // Check similarity with user message
+        if (chat.messageEmbedding && Array.isArray(chat.messageEmbedding)) {
+          const msgSimilarity = this.cosineSimilarity(queryEmbedding, chat.messageEmbedding);
+          if (msgSimilarity > maxSimilarity) {
+            maxSimilarity = msgSimilarity;
+            matchedContent = chat.userMessage;
+            matchedType = 'user_message';
+          }
+        }
+        
+        // Check similarity with bot response
+        if (chat.responseEmbedding && Array.isArray(chat.responseEmbedding)) {
+          const resSimilarity = this.cosineSimilarity(queryEmbedding, chat.responseEmbedding);
+          if (resSimilarity > maxSimilarity) {
+            maxSimilarity = resSimilarity;
+            matchedContent = chat.botResponse;
+            matchedType = 'bot_response';
+          }
+        }
+        
+        return {
+          userMessage: chat.userMessage,
+          botResponse: chat.botResponse,
+          timestamp: chat.timestamp,
+          similarity: maxSimilarity,
+          matchedContent,
+          matchedType
+        };
+      })
+      .filter(chat => chat.similarity > 0.3) // Minimum threshold
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
+      
+      console.log(`✅ Chat history search completed, returning ${similarities.length} results`);
+      if (similarities.length > 0) {
+        console.log(`🎯 Top chat scores: ${similarities.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+      }
+      
+      return similarities;
+    } catch (error) {
+      console.error('❌ Error searching chat history:', error.message);
+      return [];
     }
   }
 }

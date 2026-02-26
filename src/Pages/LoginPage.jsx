@@ -1,13 +1,53 @@
 // src/Pages/LoginPage.jsx
-import React from 'react';
+import React, { useState } from 'react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import { APP_NAME } from '../utils/constants';
 
 export default function LoginPage({ onLogin }) {
-  // Google OAuth handler
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (!email || !password) {
+      setError('กรุณากรอกอีเมลและรหัสผ่าน');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Store user info in localStorage
+        localStorage.setItem('user', JSON.stringify(result.user));
+        onLogin(result.user);
+      } else {
+        setError(result.error || 'เข้าสู่ระบบไม่สำเร็จ');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setError('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Google OAuth handler  
   const handleGoogleLogin = () => {
-    window.open("https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=YOUR_REDIRECT_URI&response_type=token&scope=email profile", "_self");
+    alert('Google OAuth ยังไม่พร้อมใช้งาน');
   };
 
   return (
@@ -45,17 +85,40 @@ export default function LoginPage({ onLogin }) {
           <div className="flex-grow border-t border-slate-200"></div>
           <div className="flex-grow border-t border-slate-200"></div>
         </div>
-        <input
-          type="text"
-          placeholder="Username or Email"
-          className="w-full mb-4 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-lg"
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          className="w-full mb-8 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-lg"
-        />
-        <Button onClick={onLogin} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 mb-3 text-lg">Login</Button>
+        
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
+            {error}
+          </div>
+        )}
+        
+        <form onSubmit={handleSubmit}>
+          <input
+            type="email"
+            placeholder="Email"
+            className="w-full mb-4 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-lg"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={loading}
+            autoComplete="email"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            className="w-full mb-8 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-lg"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={loading}
+            autoComplete="current-password"
+          />
+          <Button 
+            type="submit"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 mb-3 text-lg"
+            disabled={loading}
+          >
+            {loading ? 'กำลังเข้าสู่ระบบ...' : 'Login'}
+          </Button>
+        </form>
         <div className="mb-2 text-sm text-slate-500">
           ยังไม่มีบัญชี? <a href="/signup" className="underline text-blue-600 hover:text-blue-800 font-semibold">Sign up</a>
         </div>
