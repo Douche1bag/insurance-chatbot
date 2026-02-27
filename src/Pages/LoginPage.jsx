@@ -45,14 +45,11 @@ export default function LoginPage({ onLogin }) {
     }
   };
 
-  // Google OAuth handler  
-  const handleGoogleLogin = () => {
-    alert('Google OAuth ยังไม่พร้อมใช้งาน');
-  };
+  // ...existing code...
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-8">
-      <Card className="max-w-lg w-full p-12 text-center shadow-2xl rounded-3xl">
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+      <Card className="max-w-md w-full p-8 text-center shadow-2xl rounded-3xl">
         {/* Logo/Icon */}
         <div className="flex justify-center mb-6">
           <div className="bg-blue-100 rounded-full p-5">
@@ -63,40 +60,25 @@ export default function LoginPage({ onLogin }) {
             </svg>
           </div>
         </div>
-        <h1 className="text-3xl font-extrabold mb-3">{APP_NAME}</h1>
-        <p className="mb-8 text-slate-600 text-xl">Intelligence that simplifies your insurance lifecycle.</p>
-        <Button onClick={handleGoogleLogin} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 mb-6 flex items-center justify-center gap-3 text-lg">
-          <svg width="28" height="28" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <g clipPath="url(#clip0_17_40)">
-              <path d="M47.617 24.552c0-1.638-.147-3.203-.422-4.704H24.48v9.02h13.01c-.56 3.02-2.25 5.58-4.8 7.3v6.06h7.75c4.54-4.18 7.177-10.34 7.177-17.676z" fill="#4285F4"/>
-              <path d="M24.48 48c6.48 0 11.93-2.15 15.91-5.85l-7.75-6.06c-2.15 1.44-4.9 2.3-8.16 2.3-6.27 0-11.58-4.23-13.48-9.93H2.5v6.24C6.47 43.77 14.7 48 24.48 48z" fill="#34A853"/>
-              <path d="M11 28.46c-.5-1.44-.8-2.97-.8-4.46s.29-3.02.8-4.46v-6.24H2.5A23.98 23.98 0 000 24c0 3.97.97 7.73 2.5 10.7l8.5-6.24z" fill="#FBBC05"/>
-              <path d="M24.48 9.52c3.53 0 6.66 1.22 9.14 3.62l6.84-6.84C36.41 2.15 30.96 0 24.48 0 14.7 0 6.47 4.23 2.5 11.3l8.5 6.24c1.9-5.7 7.21-9.93 13.48-9.93z" fill="#EA4335"/>
-            </g>
-            <defs>
-              <clipPath id="clip0_17_40">
-                <path fill="#fff" d="M0 0h48v48H0z"/>
-              </clipPath>
-            </defs>
-          </svg>
-          Sign in with Google
-        </Button>
-        <div className="flex items-center my-6">
+        <h1 className="text-3xl font-extrabold mb-2">{APP_NAME}</h1>
+        <p className="mb-6 text-slate-600 text-lg">Intelligence that simplifies your insurance lifecycle.</p>
+        <div className="flex items-center my-4">
           <div className="flex-grow border-t border-slate-200"></div>
+          <div className="mx-2 text-slate-400 text-xs">เข้าสู่ระบบ</div>
           <div className="flex-grow border-t border-slate-200"></div>
         </div>
-        
+
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
             {error}
           </div>
         )}
-        
+
         <form onSubmit={handleSubmit}>
           <input
             type="email"
             placeholder="Email"
-            className="w-full mb-4 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-lg"
+            className="w-full mb-3 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-base"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             disabled={loading}
@@ -105,7 +87,7 @@ export default function LoginPage({ onLogin }) {
           <input
             type="password"
             placeholder="Password"
-            className="w-full mb-8 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-lg"
+            className="w-full mb-5 px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 text-base"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             disabled={loading}
@@ -113,7 +95,7 @@ export default function LoginPage({ onLogin }) {
           />
           <Button 
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 mb-3 text-lg"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 mb-2 text-base"
             disabled={loading}
           >
             {loading ? 'กำลังเข้าสู่ระบบ...' : 'Login'}
@@ -129,3 +111,5 @@ export default function LoginPage({ onLogin }) {
     </div>
   );
 }
+
+ 
