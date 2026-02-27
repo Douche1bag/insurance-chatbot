@@ -1,0 +1,70 @@
+# Apache Airflow with Docker Compose
+# Run: docker-compose up -d
+# Open: http://localhost:8080 (user: airflow / pass: airflow)
+
+# version: '3.8'
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.9.0
+  environment:
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+    - AIRFLOW__CORE__FERNET_KEY=FB0o_zt4e3Ziq3LdUUO7F2Z95cvFFx16hU8jTeR1ASM=
+    - AIRFLOW__CORE__LOAD_EXAMPLES=false
+    - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+    # Install extra pip packages automatically on startup
+    - _PIP_ADDITIONAL_REQUIREMENTS=pymongo==4.6.1 python-dotenv==1.0.0
+    # Your environment variables
+    - MONGODB_URI=${MONGODB_URI}
+    - TYPHOON_API_KEY=${TYPHOON_API_KEY}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    # Mount your uploads folder so Airflow can read uploaded files
+    - ../uploads:/opt/airflow/uploads
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # Database for Airflow metadata
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+
+  # Airflow web UI
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      retries: 3
+    restart: always
+
+  # Airflow task scheduler
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+
+  # First-time setup: creates admin user
+  airflow-init:
+    <<: *airflow-common
+    command: bash -c "airflow db migrate && airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@insurance.com || true"
+    restart: on-failure
+
+volumes:
+  postgres_data:
