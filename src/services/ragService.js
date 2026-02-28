@@ -208,7 +208,7 @@ class RAGService {
   /**
    * Generate response using RAG context
    */
-  async generateRAGResponse(query, contextData, language = 'thai', recentMessages = []) {
+  async generateRAGResponse(query, contextData, language = 'thai-english', recentMessages = []) {
     try {
       const systemMessage = this.buildSystemMessage(contextData, language, recentMessages);
       
@@ -228,12 +228,12 @@ class RAGService {
   /**
    * Build system message with retrieved context
    */
-  buildSystemMessage(contextData, language = 'thai', recentMessages = []) {
+  buildSystemMessage(contextData, language = 'thai-english', recentMessages = []) {
     let systemMessage;
     
     // Add conversation context if available
     if (recentMessages && recentMessages.length > 0) {
-      const conversationContext = language === 'thai' ? 
+      const conversationContext = language === 'thai-english' ? 
         '\n\n💬 บทสนทนาที่ผ่านมา:' : 
         '\n\n💬 Recent Conversation:';
       
@@ -249,7 +249,7 @@ class RAGService {
         }
       });
       
-      const contextInstruction = language === 'thai' ? 
+      const contextInstruction = language === 'thai-english' ? 
         '\n\n⚠️ สำคัญ: กรุณาอ้างอิงบริบทจากบทสนทนาก่อนหน้านี้ในการตอบคำถามปัจจุบัน หากผู้ใช้ถามถึงข้อมูลที่เคยพูดคุยไปแล้ว ให้ตอบโดยอิงจากประวัติการสนทนา' :
         '\n\n⚠️ Important: Please reference context from previous conversation when answering current question. If the user refers to previously discussed information, respond based on conversation history';
       
@@ -258,7 +258,7 @@ class RAGService {
       systemMessage = '';
     }
     
-    if (language === 'thai') {
+    if (language === 'thai' || language === 'english') {
       systemMessage += `คุณเป็นผู้ช่วยด้านประกันภัยไทยที่มีความเชี่ยวชาญ กรุณาตอบคำถามโดยใช้ข้อมูลที่เกี่ยวข้องนี้:
 
  หลักการตอบคำถาม:
@@ -277,7 +277,7 @@ class RAGService {
     }
 
     if (contextData.context && contextData.context.length > 0) {
-      const contextSection = language === 'thai' ? 
+      const contextSection = language === 'thai-english' ? 
         '\n\n📚 ข้อมูลที่เกี่ยวข้อง:' : 
         '\n\n📚 Relevant Information:';
       
@@ -288,7 +288,7 @@ class RAGService {
         systemMessage += `\n\n${index + 1}. 📄 ${doc.title}\n   📝 เนื้อหา: ${doc.content}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
       });
       
-      const instruction = language === 'thai' ? 
+      const instruction = language === 'thai-english' ? 
         '\n\n คำแนะนำ: กรุณาอ้างอิงข้อมูลข้างต้นในการตอบ และระบุแหล่งข้อมูลที่ใช้' :
         '\n\n Instructions: Please reference the above information in your response and cite the sources used';
       
@@ -297,7 +297,7 @@ class RAGService {
     
     // Add similar past conversations if available
     if (contextData.similarChats && contextData.similarChats.length > 0) {
-      const similarChatsSection = language === 'thai' ? 
+      const similarChatsSection = language === 'thai-english' ? 
         '\n\n🔍 บทสนทนาที่คล้ายกันในอดีต:' : 
         '\n\n🔍 Similar Past Conversations:';
       
@@ -313,7 +313,7 @@ class RAGService {
         systemMessage += `\n\n${index + 1}. คำถาม: ${chat.userMessage}\n   คำตอบ: ${truncatedResponse}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
       });
       
-      const chatInstruction = language === 'thai' ? 
+      const chatInstruction = language === 'thai-english' ? 
         '\n\n ℹ️ หมายเหตุ: บทสนทนาที่คล้ายกันข้างต้นอาจให้บริบทเพิ่มเติม แต่ให้ตอบตามคำถามปัจจุบันเป็นหลัก' :
         '\n\n ℹ️ Note: The similar conversations above may provide additional context, but prioritize answering the current question';
       
@@ -321,7 +321,7 @@ class RAGService {
     }
     
     if ((contextData.context && contextData.context.length === 0) && (!contextData.similarChats || contextData.similarChats.length === 0)) {
-      const noDataMessage = language === 'thai' ? 
+      const noDataMessage = language === 'thai-english' ? 
         '\n\n ไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญสำหรับข้อมูลที่แม่นยำ' :
         '\n\n No relevant information found in database. Please answer based on general insurance knowledge and recommend consulting an expert for accurate information';
       
@@ -334,9 +334,9 @@ class RAGService {
   /**
    * Generate fallback response when RAG fails
    */
-  async generateFallbackResponse(query, language = 'thai') {
+  async generateFallbackResponse(query, language = 'thai-english') {
     try {
-      const fallbackSystemMessage = language === 'thai' ? 
+      const fallbackSystemMessage = language === 'thai-english' ? 
         'คุณเป็นผู้ช่วยด้านประกันภัยไทย กรุณาตอบคำถามด้วยความรู้ทั่วไป และแนะนำให้ปรึกษาผู้เชี่ยวชาญ' :
         'You are a Thai insurance assistant. Please answer with general knowledge and recommend consulting an expert';
 
