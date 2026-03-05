@@ -9,7 +9,8 @@
     "start": "concurrently \"pnpm run server\" \"pnpm run dev\"",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start:prod": "NODE_ENV=production node server.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.0",

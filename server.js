@@ -56,6 +56,14 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
+// Serve uploaded files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(path.join(__dirname, 'dist')));
+}
+
 // ===== AUTHENTICATION ENDPOINTS =====
 
 // Register new user
@@ -639,9 +647,17 @@ app.post('/api/upload/batch', upload.array('files', 10), async (req, res) => {
   }
 });
 
+// Catch-all route for SPA (must be last)
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  });
+}
+
 // Start server
 app.listen(PORT, async () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📦 Environment: ${process.env.NODE_ENV || 'development'}`);
   
   // Test MongoDB connection
   try {
