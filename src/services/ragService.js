@@ -3,9 +3,9 @@ import { APIService } from './apiService.js';
 
 class RAGService {
   constructor() {
-    this.similarityThreshold = 0.3; // Minimum similarity score for relevant content
-    this.maxContextLength = 2000; // Maximum characters for context
-    this.defaultContextLimit = 3; // Default number of similar documents to retrieve
+    this.similarityThreshold = 0.2; // Minimum similarity score (lowered to 20% for better recall)
+    this.maxContextLength = 3000; // Maximum characters for context
+    this.defaultContextLimit = 5; // Default number of similar documents to retrieve (increased)
   }
 
   /**
@@ -93,24 +93,30 @@ class RAGService {
   /**
    * Retrieve prioritized context (user documents first, then system documents)
    */
-  async retrievePrioritizedContext(query, limit = 3, userId = null) {
+  async retrievePrioritizedContext(query, limit = 5, userId = null) {
     try {
       let userDocs = [];
       let systemDocs = [];
       let userContextCount = 0;
       let systemContextCount = 0;
       
+      // Check if query is about coverage or amounts (special handling)
+      const isCoverageQuery = this.isCoverageOrAmountQuery(query);
+      const searchLimit = isCoverageQuery ? limit * 2 : limit; // Search more docs for coverage queries
+      
       // Priority 1: Search user documents if userId provided
       if (userId) {
         try {
-          const userSimilar = await embeddingService.findSimilarUserContent(query, userId, limit);
+          const userSimilar = await embeddingService.findSimilarUserContent(query, userId, searchLimit);
           const relevantUserDocs = userSimilar.filter(doc => {
             const score = doc.similarity || doc.score || 0;
-            return score >= this.similarityThreshold;
+            // Lower threshold for coverage queries to catch more relevant info
+            const threshold = isCoverageQuery ? 0.15 : this.similarityThreshold;
+            return score >= threshold;
           });
           userDocs = relevantUserDocs.slice(0, limit);
           userContextCount = userDocs.length;
-          console.log(`👤 Found ${userContextCount} relevant user documents`);
+          console.log(`👤 Found ${userContextCount} relevant user documents (coverage query: ${isCoverageQuery})`);
         } catch (userError) {
           console.log('🔍 No user documents found, proceeding to system docs');
         }
@@ -137,9 +143,10 @@ class RAGService {
       const allDocs = [...userDocs, ...systemDocs];
       
       // Prepare context with content truncation and source marking
+      // Use longer content for user documents (uploaded files) to preserve detail
       const contextDocs = allDocs.map(doc => ({
         title: doc.title || 'เอกสาร',
-        content: this.truncateContent(doc.content, 500),
+        content: this.truncateContent(doc.content, doc.userId ? 1000 : 600), // More content for user docs
         similarity: doc.similarity || doc.score || 0,
         id: doc._id || doc.id,
         source: doc.userId ? 'user' : 'system', // Mark document source
@@ -261,11 +268,12 @@ class RAGService {
     if (language === 'thai' || language === 'english') {
       systemMessage += `คุณเป็นผู้ช่วยด้านประกันภัยไทยที่มีความเชี่ยวชาญ กรุณาตอบคำถามโดยใช้ข้อมูลที่เกี่ยวข้องนี้:
 
- หลักการตอบคำถาม:
-1. ใช้ข้อมูลจากแหล่งที่เชื่อถือได้เป็นหลัก
-2. อธิบายอย่างชัดเจนและเข้าใจง่าย
-3. ระบุแหล่งข้อมูลที่ใช้
-4. หากไม่แน่ใจ ให้แนะนำติดต่อผู้เชี่ยวชาญ`;
+ ⚠️ หลักการตอบคำถามสำคัญ:
+1. **ให้ความสำคัญสูงสุดกับเอกสารที่ผู้ใช้อัปโหลด (ไอคอน 👤)** - นี่คือกรมธรรม์จริงของผู้ใช้
+2. ตอบคำถามเกี่ยวกับ "ความคุ้มครอง" "วงเงินประกัน" "เงื่อนไข" โดยอ้างอิงจากเอกสารที่ให้มาโดยตรง
+3. ระบุตัวเลขและรายละเอียดที่แน่นอนจากเอกสาร
+4. หากข้อมูลไม่เพียงพอ ให้บอกว่าต้องการข้อมูลเพิ่มเติมจากส่วนไหนของเอกสาร
+5. อย่าเดาหรือให้ข้อมูลทั่วไป - ตอบจากเอกสารจริงเท่านั้น`;
     } else {
       systemMessage += `You are a knowledgeable Thai insurance assistant. Please answer questions using the following relevant information:
 
@@ -278,14 +286,15 @@ class RAGService {
 
     if (contextData.context && contextData.context.length > 0) {
       const contextSection = language === 'thai-english' ? 
-        '\n\n📚 ข้อมูลที่เกี่ยวข้อง:' : 
-        '\n\n📚 Relevant Information:';
+        '\n\n📚 ข้อมูลที่เกี่ยวข้อง (กรุณาอ่านทุกเอกสารอย่างละเอียด):' : 
+        '\n\n📚 Relevant Information (Please read all documents carefully):';
       
       systemMessage += contextSection;
       
       contextData.context.forEach((doc, index) => {
         const similarityPercent = (doc.similarity * 100).toFixed(1);
-        systemMessage += `\n\n${index + 1}. 📄 ${doc.title}\n   📝 เนื้อหา: ${doc.content}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
+        const sourceLabel = doc.source === 'user' ? '👤 เอกสารผู้ใช้' : '🏛️ ข้อมูลระบบ';
+        systemMessage += `\n\n${index + 1}. ${doc.sourceIcon} ${doc.title} [${sourceLabel}]\n   📝 เนื้อหา: ${doc.content}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
       });
       
       const instruction = language === 'thai-english' ? 
@@ -353,9 +362,23 @@ class RAGService {
   }
 
   /**
+   * Check if query is about coverage or insurance amounts
+   */
+  isCoverageOrAmountQuery(query) {
+    const coverageKeywords = [
+      'ความคุ้มครอง', 'คุ้มครอง', 'วงเงิน', 'จำนวนเงิน',
+      'ทุนประกัน', 'เบี้ยประกัน', 'ค่าใช้จ่าย', 'จ่ายสูงสุด',
+      'จ่ายเท่าไหร่', 'ได้เงิน', 'เคลม', 'สิทธิประโยชน์',
+      'coverage', 'amount', 'limit', 'benefit', 'claim'
+    ];
+    
+    return coverageKeywords.some(keyword => query.toLowerCase().includes(keyword.toLowerCase()));
+  }
+
+  /**
    * Utility methods
    */
-  truncateContent(content, maxLength = 500) {
+  truncateContent(content, maxLength = 800) {
     if (!content) return '';
     if (content.length <= maxLength) return content;
     return content.substring(0, maxLength) + '...';

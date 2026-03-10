@@ -40,6 +40,10 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [debugInfo, setDebugInfo] = useState('');
   const [allUsersStats, setAllUsersStats] = useState(null); // NEW: show all users stats
+  const [deleting, setDeleting] = useState(null); // Track which document is being deleted
+  const [editing, setEditing] = useState(null); // Track which document is being edited
+  const [editPolicyName, setEditPolicyName] = useState(''); // Policy name being edited
+  const [updating, setUpdating] = useState(false); // Track update in progress
 
   useEffect(() => {
     loadDashboardData();
@@ -88,11 +92,11 @@ export default function DashboardPage() {
         console.log('Could not fetch all documents stats:', err.message);
       }
 
-      // Group documents by policy number
+      // Group documents by policy number (use metadata.policyName, not extracted from content)
       const grouped = {};
       documents.forEach(doc => {
-        const content = doc?.content || '';
-        const policyNo = extractPolicyNumber(content) || 'ไม่ระบุเลขกรมธรรม์';
+        // Use policyName from metadata (which can be edited by user)
+        const policyNo = doc?.metadata?.policyName || 'ไม่ระบุกรมธรรม์';
         if (!grouped[policyNo]) grouped[policyNo] = [];
         grouped[policyNo].push({
           id: doc?._id || Math.random().toString(),
@@ -100,6 +104,7 @@ export default function DashboardPage() {
           contentLength: doc?.content?.length || 0,
           hasEmbedding: doc?.hasEmbedding || false,
           uploadedAt: doc?.metadata?.uploadedAt || doc?.metadata?.createdAt,
+          policyName: policyNo // Store for easy access
         });
       });
 
@@ -116,6 +121,94 @@ export default function DashboardPage() {
       setDebugInfo(`❌ Error: ${error.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (documentId, documentTitle) => {
+    const currentUser = getCurrentUser();
+    
+    if (!currentUser || !currentUser.id) {
+      alert('กรุณาเข้าสู่ระบบก่อนลบเอกสาร');
+      return;
+    }
+
+    // Confirm deletion
+    if (!confirm(`ต้องการลบเอกสาร "${documentTitle}" หรือไม่?\n\n⚠️ การลบจะไม่สามารถกู้คืนได้`)) {
+      return;
+    }
+
+    try {
+      setDeleting(documentId);
+      
+      const response = await fetch(`/api/user/documents/${documentId}?userId=${currentUser.id}`, {
+        method: 'DELETE'
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Success - reload data
+        alert('✅ ลบเอกสารเรียบร้อยแล้ว');
+        await loadDashboardData();
+      } else {
+        throw new Error(result.error || 'Failed to delete document');
+      }
+    } catch (error) {
+      console.error('❌ Delete error:', error);
+      alert(`❌ เกิดข้อผิดพลาด: ${error.message}`);
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const startEditingPolicy = (documentId, currentPolicyName) => {
+    setEditing(documentId);
+    setEditPolicyName(currentPolicyName === 'ไม่ระบุเลขกรมธรรม์' ? '' : currentPolicyName);
+  };
+
+  const cancelEditing = () => {
+    setEditing(null);
+    setEditPolicyName('');
+  };
+
+  const handleUpdatePolicyName = async (documentId, documentTitle) => {
+    const currentUser = getCurrentUser();
+    
+    if (!currentUser || !currentUser.id) {
+      alert('กรุณาเข้าสู่ระบบก่อนแก้ไขข้อมูล');
+      return;
+    }
+
+    const newPolicyName = editPolicyName.trim() || 'ไม่ระบุกรมธรรม์';
+
+    try {
+      setUpdating(true);
+      
+      const response = await fetch(`/api/user/documents/${documentId}/policy`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          policyName: newPolicyName
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Success - reload data
+        cancelEditing();
+        await loadDashboardData();
+      } else {
+        throw new Error(result.error || 'Failed to update policy name');
+      }
+    } catch (error) {
+      console.error('❌ Update error:', error);
+      alert(`❌ เกิดข้อผิดพลาด: ${error.message}`);
+    } finally {
+      setUpdating(false);
     }
   };
 
@@ -189,17 +282,94 @@ export default function DashboardPage() {
                   {/* Files under this policy */}
                   <ul className="divide-y divide-slate-100">
                     {files.map((file, idx) => (
-                      <li key={file.id} className="px-4 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className="text-slate-300 text-xs w-5 text-right shrink-0">{idx + 1}.</span>
-                          <div>
-                            <div className="font-medium text-slate-700 text-sm">📄 {file.title}</div>
-                            <div className="text-xs text-slate-400 mt-0.5">
-                              {file.contentLength.toLocaleString()} ตัวอักษร
-                              {file.uploadedAt && ` · ${new Date(file.uploadedAt).toLocaleDateString('th-TH')}`}
+                      <li key={file.id} className="px-4 py-3 hover:bg-slate-50 transition-colors">
+                        {editing === file.id ? (
+                          /* Editing Mode */
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-300 text-xs w-5 text-right shrink-0">{idx + 1}.</span>
+                            <div className="flex-1">
+                              <div className="font-medium text-slate-700 text-sm mb-2">📄 {file.title}</div>
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-slate-600">กรมธรรม์เลขที่:</label>
+                                <input
+                                  type="text"
+                                  value={editPolicyName}
+                                  onChange={(e) => setEditPolicyName(e.target.value)}
+                                  placeholder="ระบุเลขกรมธรรม์..."
+                                  className="flex-1 px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                  autoFocus
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleUpdatePolicyName(file.id, file.title)}
+                                disabled={updating}
+                                className="px-3 py-1.5 bg-green-50 text-green-600 hover:bg-green-100 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {updating ? '⏳ บันทึก...' : '✓ บันทึก'}
+                              </button>
+                              <button
+                                onClick={cancelEditing}
+                                disabled={updating}
+                                className="px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                ✕ ยกเลิก
+                              </button>
                             </div>
                           </div>
-                        </div>
+                        ) : (
+                          /* Normal Mode */
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <span className="text-slate-300 text-xs w-5 text-right shrink-0">{idx + 1}.</span>
+                              <div>
+                                <div className="font-medium text-slate-700 text-sm">📄 {file.title}</div>
+                                <div className="text-xs text-slate-400 mt-0.5">
+                                  {file.contentLength.toLocaleString()} ตัวอักษร
+                                  {file.uploadedAt && ` · ${new Date(file.uploadedAt).toLocaleDateString('th-TH')}`}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => startEditingPolicy(file.id, policyNumber)}
+                                disabled={deleting === file.id}
+                                className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <span>✏️</span>
+                                <span>แก้ไข</span>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteDocument(file.id, file.title)}
+                                disabled={deleting === file.id}
+                                className={`
+                                  px-3 py-1.5 rounded-lg text-xs font-medium
+                                  transition-all duration-200
+                                  ${deleting === file.id 
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                                    : 'bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 active:scale-95'
+                                  }
+                                  flex items-center gap-1.5
+                                `}
+                              >
+                                {deleting === file.id ? (
+                                  <>
+                                    <span className="animate-spin">⏳</span>
+                                    <span>กำลังลบ...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>🗑️</span>
+                                    <span>ลบ</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>

@@ -128,7 +128,7 @@ app.post('/api/auth/login', async (req, res) => {
 // Chat with RAG endpoint
 app.post('/api/chat', async (req, res) => {
   try {
-    const { query, userId } = req.body;
+    const { query, userId, conversationId } = req.body;
     
     if (!query) {
       return res.status(400).json({ 
@@ -141,14 +141,14 @@ app.post('/api/chat', async (req, res) => {
     
     console.log(`💬 Chat query: "${query}" from user: ${userId || 'guest'}`);
     
-    // Get recent chat history for context
+    // Get recent chat history for context from current conversation
     let recentMessages = [];
-    if (userId) {
+    if (userId && conversationId) {
       try {
-        const history = await mongoService.getChatHistory(userId, 5);
-        recentMessages = history.slice(-3); // Last 3 conversations
+        const conversation = await mongoService.getConversationMessages(conversationId);
+        recentMessages = conversation.messages.slice(-3); // Last 3 messages from this conversation
       } catch (historyError) {
-        console.log('⚠️ Could not load chat history:', historyError.message);
+        console.log('⚠️ Could not load conversation history:', historyError.message);
       }
     }
     
@@ -159,8 +159,8 @@ app.post('/api/chat', async (req, res) => {
       recentMessages // Pass conversation context
     });
     
-    // Store chat history with embeddings in MongoDB
-    if (result.success && userId) {
+    // Store chat message in conversation with embeddings
+    if (result.success && userId && conversationId) {
       try {
         const embeddingService = (await import('./src/services/embeddingService.js')).default;
         
@@ -168,15 +168,20 @@ app.post('/api/chat', async (req, res) => {
         const messageEmbedding = await embeddingService.generateEmbedding(query);
         const responseEmbedding = await embeddingService.generateEmbedding(result.response);
         
-        await mongoService.storeChatMessage(userId, query, result.response, {
+        await mongoService.addMessageToConversation(conversationId, userId, {
+          message: query,
+          response: result.response,
           messageEmbedding,
           responseEmbedding
         });
-        console.log('✅ Chat history saved with embeddings');
+        console.log('✅ Chat message saved to conversation with embeddings');
       } catch (saveError) {
-        console.error('⚠️ Failed to save chat history:', saveError.message);
+        console.error('⚠️ Failed to save chat message:', saveError.message);
         // Fallback: save without embeddings
-        await mongoService.storeChatMessage(userId, query, result.response);
+        await mongoService.addMessageToConversation(conversationId, userId, {
+          message: query,
+          response: result.response
+        });
       }
     }
     
@@ -210,6 +215,99 @@ app.get('/api/chat/history/:userId', async (req, res) => {
     });
   }
 });
+
+// ===== CONVERSATION MANAGEMENT ENDPOINTS =====
+
+// Get all conversations for a user
+app.get('/api/conversations/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const conversations = await mongoService.getUserConversations(userId);
+    
+    res.json({ 
+      success: true, 
+      conversations 
+    });
+  } catch (error) {
+    console.error('Get conversations error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Create new conversation
+app.post('/api/conversations', async (req, res) => {
+  try {
+    const { userId, title } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID required' });
+    }
+
+    const conversation = await mongoService.createConversation(userId, title);
+    
+    res.json({ 
+      success: true, 
+      conversation 
+    });
+  } catch (error) {
+    console.error('Create conversation error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get messages for a conversation
+app.get('/api/conversations/:conversationId/messages', async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const conversation = await mongoService.getConversationMessages(conversationId);
+    
+    res.json({ 
+      success: true, 
+      messages: conversation.messages || []
+    });
+  } catch (error) {
+    console.error('Get messages error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete conversation
+app.delete('/api/conversations/:conversationId', async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { userId } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID required' });
+    }
+
+    await mongoService.deleteConversation(conversationId, userId);
+    res.json({ success: true, message: 'Conversation deleted' });
+  } catch (error) {
+    console.error('Delete conversation error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update conversation title
+app.patch('/api/conversations/:conversationId/title', async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const { userId, title } = req.body;
+    
+    if (!userId || !title) {
+      return res.status(400).json({ success: false, error: 'User ID and title required' });
+    }
+
+    await mongoService.updateConversationTitle(conversationId, userId, title);
+    res.json({ success: true, message: 'Title updated' });
+  } catch (error) {
+    console.error('Update title error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ===== END CONVERSATION MANAGEMENT ENDPOINTS =====
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -393,8 +491,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const filePath = req.file.path;
     const fileName = req.file.originalname;
     const userId = req.body.userId || 'guest'; // Get userId from request or default to 'guest'
+    const policyName = req.body.policyName || 'ไม่ระบุกรมธรรม์'; // Policy/category name
     
-    console.log(`📄 Processing file: ${fileName} for user: ${userId}`);
+    console.log(`📄 Processing file: ${fileName} for user: ${userId} [Policy: ${policyName}]`);
     
     // Step 1: Extract text using OpenTyphoon OCR
     console.log('🔍 Extracting text with OCR...');
@@ -416,7 +515,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         mimeType: req.file.mimetype,
         size: req.file.size,
         uploadedAt: new Date(),
-        source: 'user_upload'
+        source: 'user_upload',
+        policyName: policyName // Add policy name to metadata
       }
     );
     
@@ -436,6 +536,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
         documentId,
         userId,
         fileName,
+        policyName,
         textLength: extractedText.length,
         embeddingDimensions: embedding.length,
         collection: 'user_documents',
@@ -470,10 +571,12 @@ app.get('/api/user/documents', async (req, res) => {
       data: documents.map(doc => ({
         id: doc._id,
         title: doc.title,
+        policyName: doc.metadata?.policyName || 'ไม่ระบุกรมธรรม์',
         contentLength: doc.content?.length || 0,
         hasEmbedding: !!doc.embedding,
         embeddingDimensions: doc.embedding?.length || 0,
         createdAt: doc.metadata?.createdAt,
+        uploadedAt: doc.metadata?.uploadedAt,
         metadata: doc.metadata
       }))
     });
@@ -497,6 +600,88 @@ app.get('/api/verify/:documentId', async (req, res) => {
     res.json(verification);
   } catch (error) {
     console.error('Error verifying document:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete user document
+app.delete('/api/user/documents/:documentId', async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    const userId = req.query.userId || req.body.userId;
+    
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User ID is required' 
+      });
+    }
+    
+    console.log(`🗑️ Deleting document ${documentId} for user ${userId}`);
+    
+    // Delete from MongoDB
+    const result = await mongoService.deleteUserDocument(documentId, userId);
+    
+    if (result.success) {
+      console.log(`✅ Document deleted successfully`);
+      res.json({ 
+        success: true, 
+        message: 'Document deleted successfully',
+        documentId 
+      });
+    } else {
+      res.status(404).json({ 
+        success: false, 
+        error: 'Document not found or unauthorized' 
+      });
+    }
+  } catch (error) {
+    console.error('Error deleting document:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Update document policy name
+app.patch('/api/user/documents/:documentId/policy', async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    const { userId, policyName } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'User ID is required' 
+      });
+    }
+    
+    if (!policyName) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Policy name is required' 
+      });
+    }
+    
+    console.log(`✏️ Updating policy name for document ${documentId} to "${policyName}"`);
+    
+    // Update in MongoDB
+    const result = await mongoService.updateDocumentPolicy(documentId, userId, policyName);
+    
+    if (result.success) {
+      console.log(`✅ Policy name updated successfully`);
+      res.json({ 
+        success: true, 
+        message: 'Policy name updated successfully',
+        documentId,
+        policyName
+      });
+    } else {
+      res.status(404).json({ 
+        success: false, 
+        error: 'Document not found or unauthorized' 
+      });
+    }
+  } catch (error) {
+    console.error('Error updating policy name:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -562,9 +747,10 @@ app.post('/api/upload/batch', upload.array('files', 10), async (req, res) => {
     }
 
     const userId = req.body.userId || 'guest';
+    const policyName = req.body.policyName || 'ไม่ระบุกรมธรรม์';
     const results = [];
 
-    console.log(`📦 Batch upload: ${req.files.length} files for user: ${userId}`);
+    console.log(`Batch upload: ${req.files.length} files for user: ${userId} [Policy: ${policyName}]`);
 
     for (const file of req.files) {
       const filePath = file.path;
@@ -587,7 +773,8 @@ app.post('/api/upload/batch', upload.array('files', 10), async (req, res) => {
             mimeType: file.mimetype,
             size: file.size,
             uploadedAt: new Date(),
-            source: 'user_upload'
+            source: 'user_upload',
+            policyName: policyName
           }
         );
 
@@ -601,6 +788,7 @@ app.post('/api/upload/batch', upload.array('files', 10), async (req, res) => {
           fileName,
           success: true,
           documentId,
+          policyName,
           textLength: extractedText.length,
           embeddingDimensions: embedding.length,
           verification

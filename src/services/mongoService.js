@@ -264,10 +264,99 @@ class MongoService {
         .limit(limit)
         .toArray();
 
-      return documents;
+      // Ensure all documents have policyName field (add default if missing)
+      const documentsWithPolicy = documents.map(doc => ({
+        ...doc,
+        metadata: {
+          ...(doc.metadata || {}),
+          policyName: doc.metadata?.policyName || 'ไม่ระบุกรมธรรม์'
+        }
+      }));
+
+      return documentsWithPolicy;
     } catch (error) {
       console.error('❌ Error fetching user documents:', error.message);
       return [];
+    }
+  }
+
+  // Delete user document (with authorization check)
+  async deleteUserDocument(documentId, userId) {
+    try {
+      const db = await this.connect();
+      const collection = db.collection('user_documents');
+      const { ObjectId } = await import('mongodb');
+
+      // First verify the document belongs to this user
+      const document = await collection.findOne({ 
+        _id: new ObjectId(documentId),
+        userId: userId 
+      });
+
+      if (!document) {
+        console.log(`⚠️ Document ${documentId} not found or unauthorized for user ${userId}`);
+        return { success: false, error: 'Document not found or unauthorized' };
+      }
+
+      // Delete the document
+      const result = await collection.deleteOne({ 
+        _id: new ObjectId(documentId),
+        userId: userId 
+      });
+
+      if (result.deletedCount === 1) {
+        console.log(`✅ Deleted document ${documentId} for user ${userId}`);
+        return { success: true, deletedCount: 1 };
+      } else {
+        return { success: false, error: 'Failed to delete document' };
+      }
+    } catch (error) {
+      console.error('❌ Error deleting user document:', error.message);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Update document policy name
+  async updateDocumentPolicy(documentId, userId, policyName) {
+    try {
+      const db = await this.connect();
+      const collection = db.collection('user_documents');
+      const { ObjectId } = await import('mongodb');
+
+      // First verify the document belongs to this user
+      const document = await collection.findOne({ 
+        _id: new ObjectId(documentId),
+        userId: userId 
+      });
+
+      if (!document) {
+        console.log(`⚠️ Document ${documentId} not found or unauthorized for user ${userId}`);
+        return { success: false, error: 'Document not found or unauthorized' };
+      }
+
+      // Update the policy name in metadata
+      const result = await collection.updateOne(
+        { 
+          _id: new ObjectId(documentId),
+          userId: userId 
+        },
+        { 
+          $set: { 
+            'metadata.policyName': policyName,
+            'metadata.updatedAt': new Date()
+          } 
+        }
+      );
+
+      if (result.modifiedCount === 1) {
+        console.log(`✅ Updated policy name for document ${documentId} to "${policyName}"`);
+        return { success: true, modifiedCount: 1 };
+      } else {
+        return { success: false, error: 'Failed to update policy name' };
+      }
+    } catch (error) {
+      console.error('❌ Error updating document policy:', error.message);
+      return { success: false, error: error.message };
     }
   }
 
@@ -402,6 +491,211 @@ class MongoService {
       };
     } catch (error) {
       console.error('❌ Get user error:', error);
+      throw error;
+    }
+  }
+
+  // ==================== Conversation Management ====================
+  
+  // Get all conversations for a user
+  async getUserConversations(userId) {
+    try {
+      const db = await this.connect();
+      const conversationsCollection = db.collection('conversations');
+      
+      const conversations = await conversationsCollection
+        .find({ userId })
+        .sort({ updatedAt: -1 })
+        .toArray();
+      
+      return conversations.map(conv => ({
+        _id: conv._id.toString(),
+        id: conv._id.toString(),
+        userId: conv.userId,
+        title: conv.title,
+        createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+        messageCount: conv.messages ? conv.messages.length : 0
+      }));
+    } catch (error) {
+      console.error('❌ Error getting conversations:', error);
+      throw error;
+    }
+  }
+
+  // Create a new conversation
+  async createConversation(userId, title = 'การสนทนาใหม่') {
+    try {
+      const db = await this.connect();
+      const conversationsCollection = db.collection('conversations');
+      
+      const newConversation = {
+        userId,
+        title,
+        messages: [],
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      
+      const result = await conversationsCollection.insertOne(newConversation);
+      console.log('✅ Conversation created:', result.insertedId);
+      
+      return {
+        _id: result.insertedId.toString(),
+        id: result.insertedId.toString(),
+        ...newConversation
+      };
+    } catch (error) {
+      console.error('❌ Error creating conversation:', error);
+      throw error;
+    }
+  }
+
+  // Get messages from a conversation
+  async getConversationMessages(conversationId) {
+    try {
+      const db = await this.connect();
+      const conversationsCollection = db.collection('conversations');
+      const { ObjectId } = await import('mongodb');
+      
+      // Validate ObjectId format
+      if (!ObjectId.isValid(conversationId)) {
+        throw new Error('รูปแบบ ID ของการสนทนาไม่ถูกต้อง');
+      }
+      
+      const conversation = await conversationsCollection.findOne({
+        _id: new ObjectId(conversationId)
+      });
+      
+      if (!conversation) {
+        throw new Error('ไม่พบการสนทนา');
+      }
+      
+      return {
+        _id: conversation._id.toString(),
+        id: conversation._id.toString(),
+        userId: conversation.userId,
+        title: conversation.title,
+        messages: conversation.messages || [],
+        createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt
+      };
+    } catch (error) {
+      console.error('❌ Error getting conversation messages:', error);
+      throw error;
+    }
+  }
+
+  // Add a message to a conversation
+  async addMessageToConversation(conversationId, userId, messageData) {
+    try {
+      const db = await this.connect();
+      const conversationsCollection = db.collection('conversations');
+      const { ObjectId } = await import('mongodb');
+      
+      // Validate ObjectId format
+      if (!ObjectId.isValid(conversationId)) {
+        throw new Error('รูปแบบ ID ของการสนทนาไม่ถูกต้อง');
+      }
+      
+      // Verify the conversation belongs to the user
+      const conversation = await conversationsCollection.findOne({
+        _id: new ObjectId(conversationId),
+        userId: userId
+      });
+      
+      if (!conversation) {
+        throw new Error('ไม่พบการสนทนาหรือไม่มีสิทธิ์เข้าถึง');
+      }
+      
+      const newMessage = {
+        message: messageData.message,
+        response: messageData.response,
+        messageEmbedding: messageData.messageEmbedding || null,
+        responseEmbedding: messageData.responseEmbedding || null,
+        timestamp: new Date()
+      };
+      
+      const result = await conversationsCollection.updateOne(
+        { _id: new ObjectId(conversationId) },
+        { 
+          $push: { messages: newMessage },
+          $set: { updatedAt: new Date() }
+        }
+      );
+      
+      console.log('✅ Message added to conversation:', conversationId);
+      return result;
+    } catch (error) {
+      console.error('❌ Error adding message to conversation:', error);
+      throw error;
+    }
+  }
+
+  // Delete a conversation
+  async deleteConversation(conversationId, userId) {
+    try {
+      const db = await this.connect();
+      const conversationsCollection = db.collection('conversations');
+      const { ObjectId } = await import('mongodb');
+      
+      // Validate ObjectId format
+      if (!ObjectId.isValid(conversationId)) {
+        throw new Error('รูปแบบ ID ของการสนทนาไม่ถูกต้อง');
+      }
+      
+      // Verify the conversation belongs to the user before deleting
+      const result = await conversationsCollection.deleteOne({
+        _id: new ObjectId(conversationId),
+        userId: userId
+      });
+      
+      if (result.deletedCount === 0) {
+        throw new Error('ไม่พบการสนทนาหรือไม่มีสิทธิ์ลบ');
+      }
+      
+      console.log('✅ Conversation deleted:', conversationId);
+      return result;
+    } catch (error) {
+      console.error('❌ Error deleting conversation:', error);
+      throw error;
+    }
+  }
+
+  // Update conversation title
+  async updateConversationTitle(conversationId, userId, newTitle) {
+    try {
+      const db = await this.connect();
+      const conversationsCollection = db.collection('conversations');
+      const { ObjectId } = await import('mongodb');
+      
+      // Validate ObjectId format
+      if (!ObjectId.isValid(conversationId)) {
+        throw new Error('รูปแบบ ID ของการสนทนาไม่ถูกต้อง');
+      }
+      
+      // Update the conversation title
+      const result = await conversationsCollection.updateOne(
+        { 
+          _id: new ObjectId(conversationId),
+          userId: userId
+        },
+        {
+          $set: { 
+            title: newTitle,
+            updatedAt: new Date()
+          }
+        }
+      );
+      
+      if (result.matchedCount === 0) {
+        throw new Error('ไม่พบการสนทนาหรือไม่มีสิทธิ์แก้ไข');
+      }
+      
+      console.log('✅ Conversation title updated:', conversationId);
+      return result;
+    } catch (error) {
+      console.error('❌ Error updating conversation title:', error);
       throw error;
     }
   }
