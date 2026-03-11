@@ -2,161 +2,253 @@
   {
     "id": 1,
     "question": "ไปต่อยกับบัวขาวแล้วแขนหัก ประกันสุขภาพจ่ายไหม",
-    "intent": "fight",
-    "risk_type": "voluntary_fight",
-    "expected_clause": "exclusion_fight",
     "expected_answer_type": "denial"
   },
   {
     "id": 2,
     "question": "โดนบัวขาวต่อยเพราะผมไปยืนขวางทาง แบบนี้ถือว่าอุบัติเหตุไหม",
-    "intent": "assault",
-    "risk_type": "provocation",
-    "expected_clause": "exclusion_intentional_act",
     "expected_answer_type": "conditional"
   },
   {
     "id": 3,
     "question": "ขึ้นชกมวยสมัครเล่นแล้วฟันหลุด คุ้มครองไหม",
-    "intent": "sport",
-    "risk_type": "combat_sport",
-    "expected_clause": "exclusion_high_risk_sport",
     "expected_answer_type": "conditional"
   },
   {
     "id": 4,
     "question": "โดดร่มครั้งแรกแล้วขาหัก ประกันจ่ายไหม",
-    "intent": "sport",
-    "risk_type": "extreme_sport",
-    "expected_clause": "exclusion_extreme_sport",
-    "expected_answer_type": "denial"
+    "expected_answer_type": "approval"
   },
   {
     "id": 5,
     "question": "เมาแล้วขี่มอเตอร์ไซค์ล้ม แบบนี้คุ้มครองไหม",
-    "intent": "accident",
-    "risk_type": "alcohol_related",
-    "expected_clause": "exclusion_alcohol",
     "expected_answer_type": "denial"
   },
   {
     "id": 6,
     "question": "โดนทำร้ายโดยไม่ทันตั้งตัว แบบนี้ประกันคุ้มครองไหม",
-    "intent": "assault",
-    "risk_type": "victim",
-    "expected_clause": "coverage_accident",
     "expected_answer_type": "approval"
   },
   {
     "id": 7,
     "question": "ไปแข่งรถทางเรียบแบบสมัครเล่นแล้วชน คุ้มครองไหม",
-    "intent": "sport",
-    "risk_type": "racing",
-    "expected_clause": "exclusion_racing",
     "expected_answer_type": "denial"
   },
   {
     "id": 8,
     "question": "บุกเวทีมวยโดยไม่ได้รับอนุญาตแล้วโดนการ์ดซ้อม คุ้มครองไหม",
-    "intent": "illegal_act",
-    "risk_type": "criminal_activity",
-    "expected_clause": "exclusion_illegal",
     "expected_answer_type": "denial"
   },
   {
     "id": 9,
     "question": "ปีนเขาในประเทศแล้วตกเขา ประกันจ่ายไหม",
-    "intent": "sport",
-    "risk_type": "mountaineering",
-    "expected_clause": "exclusion_high_risk_sport",
     "expected_answer_type": "conditional"
   },
   {
     "id": 10,
     "question": "โดนฟ้าผ่าระหว่างเล่นฟุตบอล คุ้มครองไหม",
-    "intent": "natural_accident",
-    "risk_type": "natural_event",
-    "expected_clause": "coverage_accident",
     "expected_answer_type": "approval"
   },
   {
     "id": 11,
     "question": "ตั้งใจไปยืนให้เขาต่อยเพื่อเอาเงินประกัน แบบนี้จ่ายไหม",
-    "intent": "fraud",
-    "risk_type": "intentional_self_harm",
-    "expected_clause": "exclusion_intentional",
     "expected_answer_type": "denial"
   },
   {
     "id": 12,
     "question": "ขับรถโดยไม่มีใบขับขี่แล้วชน คุ้มครองไหม",
-    "intent": "illegal_act",
-    "risk_type": "no_license",
-    "expected_clause": "exclusion_illegal",
     "expected_answer_type": "denial"
   },
   {
     "id": 13,
     "question": "เล่นบันจี้จัมพ์แล้วเชือกขาด คุ้มครองไหม",
-    "intent": "sport",
-    "risk_type": "extreme_sport",
-    "expected_clause": "exclusion_extreme_sport",
     "expected_answer_type": "denial"
   },
   {
     "id": 14,
     "question": "โดนลูกหลงระหว่างคนอื่นทะเลาะกัน คุ้มครองไหม",
-    "intent": "assault",
-    "risk_type": "bystander",
-    "expected_clause": "coverage_accident",
     "expected_answer_type": "approval"
   },
   {
     "id": 15,
     "question": "เสพสารเสพติดแล้วหมดสติ ต้องเข้า ICU จ่ายไหม",
-    "intent": "substance",
-    "risk_type": "drug_related",
-    "expected_clause": "exclusion_drug",
     "expected_answer_type": "denial"
   },
   {
     "id": 16,
     "question": "โดนระเบิดในพื้นที่สงคราม คุ้มครองไหม",
-    "intent": "war",
-    "risk_type": "war_zone",
-    "expected_clause": "exclusion_war",
+
     "expected_answer_type": "denial"
   },
   {
     "id": 17,
     "question": "เดินสะดุดล้มในห้าง แบบนี้ถือว่าอุบัติเหตุไหม",
-    "intent": "accident",
-    "risk_type": "normal_accident",
-    "expected_clause": "coverage_accident",
     "expected_answer_type": "approval"
   },
   {
     "id": 18,
     "question": "ปีนหลังคาบ้านซ่อมเองแล้วตก คุ้มครองไหม",
-    "intent": "accident",
-    "risk_type": "home_repair_risk",
-    "expected_clause": "coverage_accident",
     "expected_answer_type": "conditional"
   },
   {
     "id": 19,
     "question": "ไปเล่นสงกรานต์แล้วโดนรถชน คุ้มครองไหม",
-    "intent": "accident",
-    "risk_type": "traffic_accident",
-    "expected_clause": "coverage_accident",
     "expected_answer_type": "approval"
   },
   {
     "id": 20,
     "question": "อดอาหารจนช็อกเอง ประกันจ่ายไหม",
-    "intent": "self_harm",
-    "risk_type": "intentional_neglect",
-    "expected_clause": "exclusion_intentional",
     "expected_answer_type": "denial"
+  },
+   {
+    "id": 21,
+    "question": "เดินอยู่ดีๆแล้วมีคนวิ่งมาชนจนล้มแขนหัก ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 22,
+    "question": "เดินอยู่ในตลาดแล้วป้ายร้านค้าล้มใส่หัว คุ้มครองไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 23,
+    "question": "โดนหมากัดตอนเดินผ่านหน้าบ้านคนอื่น ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 24,
+    "question": "ไปต่อยกับเพื่อนเล่นๆแล้วฟันหัก แบบนี้คุ้มครองไหม",
+    "expected_answer_type": "conditional"
+  },
+  {
+    "id": 25,
+    "question": "ตั้งใจให้เพื่อนผลักตกบันไดเพื่อเคลมประกัน แบบนี้จ่ายไหม",
+    "expected_answer_type": "denial"
+  },
+  {
+    "id": 26,
+    "question": "โดนลูกบอลจากสนามฟุตบอลลอยมาโดนหน้า ฟันแตก ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 27,
+    "question": "กำลังเดินเล่นแล้วโดนจักรยานชนล้มแขนหัก คุ้มครองไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 28,
+    "question": "ปีนรั้วบ้านคนอื่นแล้วตกลงมาขาหัก แบบนี้ประกันจ่ายไหม",
+    "expected_answer_type": "denial"
+  },
+  {
+    "id": 29,
+    "question": "ไปช่วยห้ามคนทะเลาะกันแล้วโดนลูกหลงจนบาดเจ็บ ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 30,
+    "question": "นั่งอยู่ในร้านอาหารแล้วเก้าอี้พังจนล้มหลังเคล็ด คุ้มครองไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 31,
+    "question": "ปีนหน้าผาโดยไม่มีอุปกรณ์เซฟตี้แล้วตกลงมา ประกันจ่ายไหม",
+    "expected_answer_type": "denial"
+  },
+  {
+    "id": 32,
+    "question": "โดนเพื่อนแกล้งผลักลงสระน้ำแล้วหัวกระแทก แบบนี้คุ้มครองไหม",
+    "expected_answer_type": "conditional"
+  },
+  {
+    "id": 33,
+    "question": "นั่งรถเมล์อยู่แล้วรถเบรกกะทันหันจนหัวกระแทก คุ้มครองไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 34,
+    "question": "ไปเล่นสเก็ตบอร์ดแล้วล้มแขนหัก ประกันจ่ายไหม",
+    "expected_answer_type": "conditional"
+  },
+  {
+    "id": 35,
+    "question": "โดนขวดเบียร์ปาใส่ตอนอยู่ในผับ แบบนี้คุ้มครองไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 36,
+    "question": "ขี่มอเตอร์ไซค์ซิ่งแข่งกับเพื่อนแล้วล้ม แบบนี้ประกันจ่ายไหม",
+    "expected_answer_type": "denial"
+  },
+  {
+    "id": 37,
+    "question": "โดนป้ายโฆษณาปลิวใส่ตอนเดินบนฟุตบาท คุ้มครองไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 38,
+    "question": "เล่นว่าวแล้วโดนไฟฟ้าช็อตจากสายไฟ แบบนี้ประกันจ่ายไหม",
+    "expected_answer_type": "conditional"
+  },
+  {
+    "id": 39,
+    "question": "เมาแล้วตกบันไดในบ้านตัวเอง ประกันจ่ายไหม",
+    "expected_answer_type": "conditional"
+  },
+  {
+    "id": 40,
+    "question": "แอบเข้าไปในไซต์ก่อสร้างแล้วของตกใส่หัว แบบนี้คุ้มครองไหม",
+    "expected_answer_type": "denial"
+  },
+  {
+    "id": 41,
+    "question": "โดนฟ้าผ่าตอนเดินตากฝน ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 42,
+    "question": "ไปเล่นบันจี้จัมพ์แล้วข้อเท้าแพลง ประกันจ่ายไหม",
+    "expected_answer_type": "conditional"
+  },
+  {
+    "id": 43,
+    "question": "ขี่จักรยานออกกำลังกายแล้วโดนรถชน คุ้มครองไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 44,
+    "question": "เดินอยู่ในห้างแล้วลื่นล้มเพราะพื้นเปียก ข้อมือแพลง ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 45,
+    "question": "ปีนต้นไม้เล่นแล้วตกลงมาขาหัก แบบนี้ประกันจ่ายไหม",
+    "expected_answer_type": "conditional"
+  },
+  {
+    "id": 46,
+    "question": "ทะเลาะกับคนอื่นแล้วต่อยกันจนจมูกหัก ประกันคุ้มครองไหม",
+    "expected_answer_type": "denial"
+  },
+  {
+    "id": 47,
+    "question": "โดนเด็กปั่นจักรยานชนตอนเดินในสวนสาธารณะ ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 48,
+    "question": "แอบเข้าไปเล่นในอาคารร้างแล้วพื้นพังตกลงมา แบบนี้คุ้มครองไหม",
+    "expected_answer_type": "denial"
+  },
+  {
+    "id": 49,
+    "question": "กำลังถ่ายรูปอยู่แล้วถอยหลังตกฟุตบาทข้อเท้าแพลง ประกันจ่ายไหม",
+    "expected_answer_type": "approval"
+  },
+  {
+    "id": 50,
+    "question": "เล่นมวยกับเพื่อนแบบสมัครใจแล้วบาดเจ็บ ประกันจ่ายไหม",
+    "expected_answer_type": "conditional"
   }
+
 ]

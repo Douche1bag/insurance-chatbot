@@ -4,8 +4,9 @@ import { APIService } from './apiService.js';
 class RAGService {
   constructor() {
     this.similarityThreshold = 0.2; // Minimum similarity score (lowered to 20% for better recall)
-    this.maxContextLength = 3000; // Maximum characters for context
-    this.defaultContextLimit = 5; // Default number of similar documents to retrieve (increased)
+    this.maxContextLength = 2000; // Maximum characters for context
+    this.defaultContextLimit = 3; // Default number of similar documents to retrieve
+    this.maxChunkLength = 600; // Maximum length per chunk in context
   }
 
   /**
@@ -102,7 +103,7 @@ class RAGService {
       
       // Check if query is about coverage or amounts (special handling)
       const isCoverageQuery = this.isCoverageOrAmountQuery(query);
-      const searchLimit = isCoverageQuery ? limit * 2 : limit; // Search more docs for coverage queries
+      const searchLimit = isCoverageQuery ? limit * 1.5 : limit; // Search slightly more docs for coverage queries
       
       // Priority 1: Search user documents if userId provided
       if (userId) {
@@ -143,14 +144,16 @@ class RAGService {
       const allDocs = [...userDocs, ...systemDocs];
       
       // Prepare context with content truncation and source marking
-      // Use longer content for user documents (uploaded files) to preserve detail
+      // Truncate chunks to prevent token overflow while preserving key information
       const contextDocs = allDocs.map(doc => ({
         title: doc.title || 'เอกสาร',
-        content: this.truncateContent(doc.content, doc.userId ? 1000 : 600), // More content for user docs
+        content: this.truncateContent(doc.content, this.maxChunkLength), // Limit chunk size
         similarity: doc.similarity || doc.score || 0,
         id: doc._id || doc.id,
         source: doc.userId ? 'user' : 'system', // Mark document source
-        sourceIcon: doc.userId ? '👤' : '🏛️'
+        sourceIcon: doc.userId ? '👤' : '🏛️',
+        isChunked: doc.metadata?.isChunked || false,
+        chunkInfo: doc.metadata?.isChunked ? ` [${doc.metadata.chunkIndex + 1}/${doc.metadata.totalChunks}]` : ''
       }));
       
       console.log(`📄 Retrieved ${contextDocs.length} total documents (${userContextCount} user + ${systemContextCount} system)`);
@@ -266,35 +269,80 @@ class RAGService {
     }
     
     if (language === 'thai' || language === 'english') {
-      systemMessage += `คุณเป็นผู้ช่วยด้านประกันภัยไทยที่มีความเชี่ยวชาญ กรุณาตอบคำถามโดยใช้ข้อมูลที่เกี่ยวข้องนี้:
+      systemMessage += `คุณเป็นผู้ช่วยด้านประกันภัยไทยที่เชี่ยวชาญ ตอบคำถามสั้น กระชับ ตรงประเด็น
 
- ⚠️ หลักการตอบคำถามสำคัญ:
-1. **ให้ความสำคัญสูงสุดกับเอกสารที่ผู้ใช้อัปโหลด (ไอคอน 👤)** - นี่คือกรมธรรม์จริงของผู้ใช้
-2. ตอบคำถามเกี่ยวกับ "ความคุ้มครอง" "วงเงินประกัน" "เงื่อนไข" โดยอ้างอิงจากเอกสารที่ให้มาโดยตรง
-3. ระบุตัวเลขและรายละเอียดที่แน่นอนจากเอกสาร
-4. หากข้อมูลไม่เพียงพอ ให้บอกว่าต้องการข้อมูลเพิ่มเติมจากส่วนไหนของเอกสาร
-5. อย่าเดาหรือให้ข้อมูลทั่วไป - ตอบจากเอกสารจริงเท่านั้น`;
+📋 รูปแบบการตอบตามประเภทคำถาม:
+
+**1️⃣ คำถามเรื่องความคุ้มครอง (เช่น "ขาหักคุ้มครองไหม", "อุบัติเหตุจ่ายไหม"):**
+- บรรทัดแรก: ✅ "คุ้มครอง" / ❌ "ไม่คุ้มครอง" / ⚠️ "conditional"
+- บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
+- คำอธิบาย 2-3 ประโยค: เหตุผลและเงื่อนไข
+
+**2️⃣ คำถามเรื่องวงเงิน/จำนวนเงิน (เช่น "วงเงินประกันเท่าไหร่", "จ่ายสูงสุดเท่าไร"):**
+- บรรทัดแรก: "วงเงิน [จำนวนเงิน] บาท"
+- บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
+- คำอธิบายสั้น: รายละเอียดเพิ่มเติม (ถ้ามี)
+
+**3️⃣ คำถามเรื่องเบี้ยประกัน/ค่าใช้จ่าย:**
+- บรรทัดแรก: "เบี้ยประกัน [จำนวนเงิน] บาท/[งวด]"
+- บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
+- คำอธิบายสั้น: เงื่อนไขการจ่าย
+
+**4️⃣ คำถามทั่วไป/รายละเอียดอื่นๆ:**
+- เริ่มด้วยคำตอบโดยตรง
+- ระบุแหล่งที่มา (กรมธรรม์)
+- อธิบายสั้นๆ 2-4 ประโยค
+
+⚠️ หลักการสำคัญ:
+1. **ให้ความสำคัญกับเอกสารผู้ใช้ (👤) เป็นอันดับแรก** - นี่คือกรมธรรม์จริง
+2. **เริ่มด้วยคำตอบเสมอ** - อย่าขึ้นต้นด้วย "จากข้อมูล..." หรือ "ตามเอกสาร..."
+3. **ตอบสั้น 3-6 ประโยค** - ไม่เกิน 10 ประโยค
+4. **ระบุชื่อกรมธรรม์เสมอ** - บอกว่าข้อมูลมาจากกรมธรรม์ไหน
+5. **มุ่งเน้นตามคำถาม** - ถ้าถามอุบัติเหตุก็ตอบอุบัติเหตุ อย่าพูดถึงโรค
+
+❌ อย่าทำ:
+- อย่าเขียนยาวเกิน 10 ประโยค
+- อย่าพูดนอกเรื่อง (ถามอุบัติเหตุแต่ตอบเรื่องโรค)
+- อย่าแนะนำให้ส่งเอกสารเพิ่ม ถ้ามีข้อมูลพอตอบ
+- อย่าใช้หัวข้อ ### หรือจัดรูปแบบซับซ้อน`;
     } else {
-      systemMessage += `You are a knowledgeable Thai insurance assistant. Please answer questions using the following relevant information:
+      systemMessage += `You are a Thai insurance assistant specializing in accident coverage assessment.
 
- Response Guidelines:
-1. Use information from reliable sources as the primary basis
-2. Explain clearly and simply
-3. Cite sources used
-4. If uncertain, recommend consulting an expert`;
+📋 Response Format (Keep it SHORT and DIRECT):
+
+**First Line - Clear Answer:**
+✅ "คุ้มครอง" (Covered) - if insurance pays
+❌ "ไม่คุ้มครอง" (Not covered) - if insurance doesn't pay
+⚠️ "conditional" - if conditions need verification
+
+**Second Line - Source:**
+"From policy [Policy Name/Type]"
+
+**Brief Explanation (2-3 sentences only):**
+- Why covered/not covered
+- Important conditions (if any)
+- Reference policy clause (if available)
+
+⚠️ Key Rules:
+1. Prioritize user documents (👤) - these are real policies
+2. **Answer SHORT, CONCISE, CLEAR** - don't write long
+3. **Start with answer** - covered/not covered/conditional
+4. **Focus on accidents** - don't mention diseases unless asked
+5. **Cite policy name** - specify which policy`;
     }
 
     if (contextData.context && contextData.context.length > 0) {
       const contextSection = language === 'thai-english' ? 
-        '\n\n📚 ข้อมูลที่เกี่ยวข้อง (กรุณาอ่านทุกเอกสารอย่างละเอียด):' : 
-        '\n\n📚 Relevant Information (Please read all documents carefully):';
+        '\n\n ข้อมูลที่เกี่ยวข้อง (กรุณาอ่านทุกเอกสารอย่างละเอียด):' : 
+        '\n\n Relevant Information (Please read all documents carefully):';
       
       systemMessage += contextSection;
       
       contextData.context.forEach((doc, index) => {
         const similarityPercent = (doc.similarity * 100).toFixed(1);
         const sourceLabel = doc.source === 'user' ? '👤 เอกสารผู้ใช้' : '🏛️ ข้อมูลระบบ';
-        systemMessage += `\n\n${index + 1}. ${doc.sourceIcon} ${doc.title} [${sourceLabel}]\n   📝 เนื้อหา: ${doc.content}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
+        const chunkLabel = doc.chunkInfo || '';
+        systemMessage += `\n\n${index + 1}. ${doc.sourceIcon} ${doc.title}${chunkLabel} [${sourceLabel}]\n   📝 เนื้อหา: ${doc.content}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
       });
       
       const instruction = language === 'thai-english' ? 
