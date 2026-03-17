@@ -6,8 +6,7 @@ export default function ChatHeader() {
           📄 {/* Replaced FileText icon */}
         </div>
         <div className="chat-header-text">
-          <h1>ผู้ช่วยสรุปกรมธรรม์ประกันภัย</h1>
-          <p>Powered by Typhoon AI</p>
+          {/* ...existing code... */}
         </div>
       </div>
     </header>
