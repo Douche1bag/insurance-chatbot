@@ -39,7 +39,7 @@ def create_test_conversation(user_id):
             result = response.json()
             if result.get('success'):
                 conv_id = result['conversation'].get('_id') or result['conversation'].get('id')
-                print(f"✅ Created test conversation: {conv_id}")
+                print(f" Created test conversation: {conv_id}")
                 return conv_id
         
         print(f"⚠️  Failed to create conversation, using fallback ID")
@@ -69,14 +69,14 @@ def classify_answer(answer_text):
     first_lines = '\n'.join(answer_text.split('\n')[:3]).lower()
     
     # Check first lines for explicit classification
-    if '✅' in first_lines or 'คุ้มครอง' in first_lines:
+    if 'approved' in first_lines or 'คุ้มครอง' in first_lines:
         if 'ไม่คุ้มครอง' not in first_lines:
             return "approval"
     
-    if '❌' in first_lines or 'ไม่คุ้มครอง' in first_lines:
+    if 'not covered' in first_lines or 'ไม่คุ้มครอง' in first_lines:
         return "denial"
     
-    if '⚠️' in first_lines or 'conditional' in first_lines:
+    if 'conditional' in first_lines or 'conditional' in first_lines:
         return "conditional"
     
     # Fallback to keyword counting in full text
@@ -148,7 +148,7 @@ def run_evaluation(test_cases, user_id=USER_ID, conversation_id=None):
     results = []
     total = len(test_cases)
     
-    print(f"🧪 Running {total} test cases...")
+    print(f"test Running {total} test cases...")
     print("=" * 80)
     
     for i, test in enumerate(test_cases, 1):
@@ -178,7 +178,7 @@ def run_evaluation(test_cases, user_id=USER_ID, conversation_id=None):
         results.append(result)
         
         # Print result
-        status = "✅" if correct else "❌"
+        status = "correct" if correct else "❌"
         print(f"{status} Expected: {expected}, Predicted: {predicted}")
         
         # Rate limiting - be nice to the API
@@ -191,7 +191,7 @@ def save_results(results, output_file):
     """Save evaluation results to JSON file"""
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    print(f"\n✅ Results saved to: {output_file}")
+    print(f"\n Results saved to: {output_file}")
 
 def print_summary(results):
     """Print evaluation summary with precision, recall, and F1 score"""
@@ -237,14 +237,14 @@ def print_summary(results):
     weighted_f1 = sum(m['f1'] * m['support'] for m in metrics.values()) / total_support if total_support > 0 else 0
     
     print("\n" + "=" * 80)
-    print("📊 EVALUATION SUMMARY")
+    print(" EVALUATION SUMMARY")
     print("=" * 80)
     print(f"Total test cases: {total}")
     print(f"Correct predictions: {correct}")
     print(f"Overall Accuracy: {accuracy:.1f}%")
     print("=" * 80)
     
-    print("\n📈 PER-CLASS METRICS:")
+    print("\n PER-CLASS METRICS:")
     print("-" * 80)
     print(f"{'Class':<15} {'Precision':>10} {'Recall':>10} {'F1-Score':>10} {'Support':>10}")
     print("-" * 80)
@@ -288,7 +288,7 @@ if __name__ == '__main__':
     try:
         health_response = requests.get("http://localhost:3001/api/health", timeout=5)
         if health_response.status_code == 200:
-            print("✅ API is running")
+            print(" API is running")
         else:
             print("⚠️  API returned unexpected status")
     except Exception as e:
@@ -298,7 +298,7 @@ if __name__ == '__main__':
     
     # Load test cases
     test_cases = load_test_cases(TEST_CASES_FILE)
-    print(f"✅ Loaded {len(test_cases)} test cases from {TEST_CASES_FILE}")
+    print(f" Loaded {len(test_cases)} test cases from {TEST_CASES_FILE}")
     
     # Create test conversation
     print(f"\n🔨 Creating test conversation for user: {USER_ID}")
@@ -318,6 +318,6 @@ if __name__ == '__main__':
     metrics_file = OUTPUT_FILE.replace('.json', '_metrics.json')
     with open(metrics_file, 'w', encoding='utf-8') as f:
         json.dump(summary_metrics, f, ensure_ascii=False, indent=2)
-    print(f"\n✅ Metrics saved to: {metrics_file}")
+    print(f"\n Metrics saved to: {metrics_file}")
     
     print(f"\n💡 View detailed results in: {OUTPUT_FILE}")

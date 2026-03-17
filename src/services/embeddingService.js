@@ -23,14 +23,14 @@ class EmbeddingService {
       });
 
       if (!response.ok) {
-        console.log(`⚠️ Embedding API unavailable (${response.status}), using fallback method`);
+        console.log(`Embedding API unavailable (${response.status}), using fallback method`);
         return this.generateSimpleEmbedding(text);
       }
 
       const data = await response.json();
       return data.data[0].embedding;
     } catch (error) {
-      console.log(`⚠️ Embedding API error (${error.message}), using fallback method`);
+      console.log(`Embedding API error (${error.message}), using fallback method`);
       // Fallback to a simple hash-based embedding for demo purposes
       return this.generateSimpleEmbedding(text);
     }
@@ -40,7 +40,7 @@ class EmbeddingService {
   generateSimpleEmbedding(text, dimensions = 384) {
     // Safety check for undefined/null text
     if (!text || typeof text !== 'string') {
-      console.warn('⚠️ Invalid text for embedding, using empty string');
+      console.warn('Invalid text for embedding, using empty string');
       text = '';
     }
     
@@ -88,7 +88,7 @@ class EmbeddingService {
         }
       );
     } catch (error) {
-      console.error('❌ Error storing chat with embedding:', error.message);
+      console.error('Error storing chat with embedding:', error.message);
       throw error;
     }
   }
@@ -103,7 +103,7 @@ class EmbeddingService {
         embeddingDimensions: embedding.length
       });
     } catch (error) {
-      console.error('❌ Error storing document with embedding:', error.message);
+      console.error('Error storing document with embedding:', error.message);
       throw error;
     }
   }
@@ -117,18 +117,18 @@ class EmbeddingService {
       // Try vector search first (requires Atlas Search index)
       try {
         const results = await mongoService.vectorSearch(queryEmbedding, limit);
-        console.log(`✅ Vector search returned ${results.length} results`);
+        console.log(`Vector search returned ${results.length} results`);
         return results;
       } catch (vectorError) {
-        console.warn('⚠️ Vector search not available, using fallback method');
+        console.warn('Vector search not available, using fallback method');
         
         // Fallback: Manual similarity calculation
         const results = await this.manualSimilaritySearch(queryEmbedding, limit);
-        console.log(`✅ Manual search returned ${results.length} results`);
+        console.log(`Manual search returned ${results.length} results`);
         return results;
       }
     } catch (error) {
-      console.error('❌ Error finding similar content:', error.message);
+      console.error('Error finding similar content:', error.message);
       throw error;
     }
   }
@@ -136,15 +136,15 @@ class EmbeddingService {
   // Manual similarity search (when Atlas Search is not available)
   async manualSimilaritySearch(queryEmbedding, limit = 5) {
     try {
-      console.log('🔄 Performing manual similarity search...');
+      console.log('Performing manual similarity search...');
       const db = await mongoService.connect();
       const collection = db.collection('thai_insurance_docs');
       
       const documents = await collection.find({}).toArray();
-      console.log(`📄 Found ${documents.length} documents in database`);
+      console.log(`Found ${documents.length} documents in database`);
       
       if (documents.length === 0) {
-        console.log('⚠️ No documents found in database');
+        console.log('No documents found in database');
         return [];
       }
       
@@ -164,12 +164,12 @@ class EmbeddingService {
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
       
-      console.log(`✅ Manual search completed, returning ${sortedResults.length} results`);
-      console.log(`🎯 Top similarity scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+      console.log(`Manual search completed, returning ${sortedResults.length} results`);
+      console.log(`Top similarity scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
       
       return sortedResults;
     } catch (error) {
-      console.error('❌ Error in manual similarity search:', error.message);
+      console.error('Error in manual similarity search:', error.message);
       throw error;
     }
   }
@@ -194,7 +194,7 @@ class EmbeddingService {
         timestamp: new Date()
       };
     } catch (error) {
-      console.error('❌ Error getting relevant context:', error.message);
+      console.error('Error getting relevant context:', error.message);
       return { context: [], query, timestamp: new Date() };
     }
   }
@@ -202,13 +202,13 @@ class EmbeddingService {
   // Find similar content in USER documents
   async findSimilarUserContent(query, userId, limit = 5) {
     try {
-      console.log(`🔍 Searching user documents for userId: ${userId}`);
+      console.log(`Searching user documents for userId: ${userId}`);
       
       const db = await mongoService.connect();
       const collection = db.collection('user_documents');
       
       const userDocuments = await collection.find({ userId }).toArray();
-      console.log(`📄 Found ${userDocuments.length} user documents`);
+      console.log(`Found ${userDocuments.length} user documents`);
       
       if (userDocuments.length === 0) {
         return [];
@@ -218,7 +218,7 @@ class EmbeddingService {
       const policyNumberMatch = query.match(/(\d{7,10})/);
       if (policyNumberMatch) {
         const policyNumber = policyNumberMatch[1];
-        console.log(`🎯 Detected policy number in query: ${policyNumber}`);
+        console.log(`Detected policy number in query: ${policyNumber}`);
         
         // Try exact match first
         const exactMatches = userDocuments.filter(doc => 
@@ -226,7 +226,7 @@ class EmbeddingService {
         );
         
         if (exactMatches.length > 0) {
-          console.log(`✅ Found ${exactMatches.length} exact matches for policy ${policyNumber}`);
+          console.log(`Found ${exactMatches.length} exact matches for policy ${policyNumber}`);
           return exactMatches.map(doc => ({
             ...doc,
             similarity: 1.0, // Perfect match
@@ -256,14 +256,14 @@ class EmbeddingService {
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
       
-      console.log(`✅ User search completed, returning ${sortedResults.length} results`);
+      console.log(`User search completed, returning ${sortedResults.length} results`);
       if (sortedResults.length > 0) {
-        console.log(`🎯 Top user doc scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+        console.log(`Top user doc scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
       }
       
       return sortedResults;
     } catch (error) {
-      console.error('❌ Error finding similar user content:', error.message);
+      console.error(' Error finding similar user content:', error.message);
       return [];
     }
   }
@@ -274,7 +274,7 @@ class EmbeddingService {
    */
   async findSimilarChatHistory(query, userId, limit = 5) {
     try {
-      console.log(`💬 Searching chat history for: "${query}"`);
+      console.log(`Searching chat history for: "${query}"`);
       const queryEmbedding = await this.generateEmbedding(query);
       
       const db = await mongoService.connect();
@@ -289,7 +289,7 @@ class EmbeddingService {
         ]
       }).toArray();
       
-      console.log(`📄 Found ${chatHistory.length} chat messages with embeddings`);
+      console.log(`Found ${chatHistory.length} chat messages with embeddings`);
       
       if (chatHistory.length === 0) {
         return [];
@@ -333,14 +333,14 @@ class EmbeddingService {
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, limit);
       
-      console.log(`✅ Chat history search completed, returning ${similarities.length} results`);
+      console.log(`Chat history search completed, returning ${similarities.length} results`);
       if (similarities.length > 0) {
-        console.log(`🎯 Top chat scores: ${similarities.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+        console.log(`Top chat scores: ${similarities.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
       }
       
       return similarities;
     } catch (error) {
-      console.error('❌ Error searching chat history:', error.message);
+      console.error('Error searching chat history:', error.message);
       return [];
     }
   }

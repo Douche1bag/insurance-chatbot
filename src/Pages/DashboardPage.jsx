@@ -38,7 +38,7 @@ const extractPolicyNumber = (content = '') => {
 export default function DashboardPage() {
   const [policies, setPolicies] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [debugInfo, setDebugInfo] = useState('');
+  // const [debugInfo, setDebugInfo] = useState('');
   const [allUsersStats, setAllUsersStats] = useState(null); // NEW: show all users stats
   const [deleting, setDeleting] = useState(null); // Track which document is being deleted
   const [editing, setEditing] = useState(null); // Track which document is being edited
@@ -63,23 +63,23 @@ export default function DashboardPage() {
         return;
       }
 
-      setDebugInfo(`User ID: ${currentUser.id}`);
+      // setDebugInfo(`User ID: ${currentUser.id}`);
 
       // ✅ FIX 1: Use relative URL instead of hardcoded localhost
       // This works for both local AND ngrok public URL
       const response = await fetch(`/api/documents/user/${currentUser.id}?limit=20`);
       const result = await response.json();
 
-      console.log('📡 API Response:', result);
+      console.log('API Response:', result);
 
       if (!result.success) {
         throw new Error(result.error || 'Failed to fetch documents');
       }
 
       const documents = result.data || [];
-      console.log('📄 Fetched documents:', documents.length);
+      console.log('Fetched documents:', documents.length);
 
-      setDebugInfo(`User ID: ${currentUser.id} | Documents: ${documents.length}`);
+      // setDebugInfo(`User ID: ${currentUser.id} | Documents: ${documents.length}`);
 
       // ✅ FIX 2: Also fetch ALL users' documents for dashboard overview
       try {
@@ -117,8 +117,8 @@ export default function DashboardPage() {
 
       setPolicies(sorted);
     } catch (error) {
-      console.error('❌ Dashboard error:', error);
-      setDebugInfo(`❌ Error: ${error.message}`);
+      console.error('Dashboard error:', error);
+      setDebugInfo(`Error: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -218,14 +218,14 @@ export default function DashboardPage() {
       <div className="w-full max-w-4xl mx-auto mt-6 px-4">
         <h2 className="text-xl font-bold mb-1">Dashboard</h2>
 
-        {/* Debug Info */}
+        {/* Debug Info
         {debugInfo && (
           <div className="text-xs text-slate-400 mb-4 bg-slate-100 rounded px-3 py-1">
             🔍 {debugInfo}
           </div>
-        )}
+        )} */}
 
-        {/* ✅ NEW: All Users Stats Card */}
+        {/* NEW: All Users Stats Card */}
         {allUsersStats && (
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-white rounded-xl border border-slate-200 p-4 text-center">

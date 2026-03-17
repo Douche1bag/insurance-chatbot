@@ -438,11 +438,11 @@ export default function ChatPage({ user }) {
       <div className="flex-1 flex flex-col bg-white rounded-lg border">
         <div className="flex justify-between items-center p-4 border-b">
           <h1 className="text-xl font-bold">
-            💬 {conversations.find(c => c._id === currentConversationId)?.title || 'AI Chat'}
+             {conversations.find(c => c._id === currentConversationId)?.title || 'AI Chat'}
           </h1>
           {lastContext && (
             <div className="text-sm text-gray-500">
-              📊 {lastContext.userContextCount > 0 
+               {lastContext.userContextCount > 0 
                 ? `${lastContext.userContextCount} เอกสารของคุณ` 
                 : `${lastContext.systemContextCount} เอกสารระบบ`}
             </div>
