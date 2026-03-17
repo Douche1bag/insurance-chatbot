@@ -14,7 +14,7 @@ export class APIService {
         },
         body: JSON.stringify({
           model: API_CONFIG.model,
-          messages: messages, // Don't add SYSTEM_MESSAGE - RAG already includes it
+          messages: messages, 
           max_tokens: API_CONFIG.maxTokens,
           temperature: API_CONFIG.temperature
         })

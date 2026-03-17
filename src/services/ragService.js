@@ -38,7 +38,7 @@ class RAGService {
     } = options;
 
     try {
-      console.log('🔍 Starting RAG workflow for query:', userQuery);
+      console.log('Starting RAG workflow for query:', userQuery);
       
       // Optional: Search for semantically similar past conversations
       let similarPastChats = [];
@@ -46,10 +46,10 @@ class RAGService {
         try {
           similarPastChats = await embeddingService.findSimilarChatHistory(userQuery, userId, 2);
           if (similarPastChats.length > 0) {
-            console.log(`💭 Found ${similarPastChats.length} similar past conversations`);
+            console.log(` Found ${similarPastChats.length} similar past conversations`);
           }
         } catch (chatSearchError) {
-          console.log('⚠️ Could not search chat history:', chatSearchError.message);
+          console.log(' Could not search chat history:', chatSearchError.message);
         }
       }
       
@@ -81,7 +81,7 @@ class RAGService {
         }
       };
     } catch (error) {
-      console.error('❌ RAG workflow error:', error.message);
+      console.error('Error in RAG workflow:', error.message);
       return {
         success: false,
         query: userQuery,
@@ -134,9 +134,9 @@ class RAGService {
           });
           systemDocs = relevantSystemDocs.slice(0, remaining);
           systemContextCount = systemDocs.length;
-          console.log(`🏛️ Found ${systemContextCount} relevant system documents`);
+          console.log(`Found ${systemContextCount} relevant system documents`);
         } catch (systemError) {
-          console.error('❌ Error searching system documents:', systemError.message);
+          console.error('Error searching system documents:', systemError.message);
         }
       }
       
@@ -156,7 +156,7 @@ class RAGService {
         chunkInfo: doc.metadata?.isChunked ? ` [${doc.metadata.chunkIndex + 1}/${doc.metadata.totalChunks}]` : ''
       }));
       
-      console.log(`📄 Retrieved ${contextDocs.length} total documents (${userContextCount} user + ${systemContextCount} system)`);
+      console.log(`Retrieved ${contextDocs.length} total documents (${userContextCount} user + ${systemContextCount} system)`);
       
       return {
         context: contextDocs,
@@ -166,7 +166,7 @@ class RAGService {
         query: query
       };
     } catch (error) {
-      console.error('❌ Error retrieving prioritized context:', error.message);
+      console.error('Error retrieving prioritized context:', error.message);
       return { 
         context: [], 
         userContextCount: 0,
@@ -201,7 +201,7 @@ class RAGService {
         id: doc._id || doc.id
       }));
 
-      console.log(`📄 Retrieved ${contextDocs.length} relevant documents`);
+      console.log(`Retrieved ${contextDocs.length} relevant documents`);
       
       return {
         context: contextDocs,
@@ -210,7 +210,7 @@ class RAGService {
         query: query
       };
     } catch (error) {
-      console.error('❌ Error retrieving context:', error.message);
+      console.error('Error retrieving context:', error.message);
       return { context: [], totalFound: 0, relevantCount: 0, query };
     }
   }
@@ -260,8 +260,8 @@ class RAGService {
       });
       
       const contextInstruction = language === 'thai-english' ? 
-        '\n\n⚠️ สำคัญ: กรุณาอ้างอิงบริบทจากบทสนทนาก่อนหน้านี้ในการตอบคำถามปัจจุบัน หากผู้ใช้ถามถึงข้อมูลที่เคยพูดคุยไปแล้ว ให้ตอบโดยอิงจากประวัติการสนทนา' :
-        '\n\n⚠️ Important: Please reference context from previous conversation when answering current question. If the user refers to previously discussed information, respond based on conversation history';
+        '\n\n สำคัญ: กรุณาอ้างอิงบริบทจากบทสนทนาก่อนหน้านี้ในการตอบคำถามปัจจุบัน หากผู้ใช้ถามถึงข้อมูลที่เคยพูดคุยไปแล้ว ให้ตอบโดยอิงจากประวัติการสนทนา' :
+        '\n\n Important: Please reference context from previous conversation when answering current question. If the user refers to previously discussed information, respond based on conversation history';
       
       systemMessage = conversationHistory + contextInstruction + '\n\n---\n';
     } else {
@@ -271,36 +271,36 @@ class RAGService {
     if (language === 'thai' || language === 'english') {
       systemMessage += `คุณเป็นผู้ช่วยด้านประกันภัยไทยที่เชี่ยวชาญ ตอบคำถามสั้น กระชับ ตรงประเด็น
 
-📋 รูปแบบการตอบตามประเภทคำถาม:
+ รูปแบบการตอบตามประเภทคำถาม:
 
-**1️⃣ คำถามเรื่องความคุ้มครอง (เช่น "ขาหักคุ้มครองไหม", "อุบัติเหตุจ่ายไหม"):**
+**1️ คำถามเรื่องความคุ้มครอง (เช่น "ขาหักคุ้มครองไหม", "อุบัติเหตุจ่ายไหม"):**
 - บรรทัดแรก: ✅ "คุ้มครอง" / ❌ "ไม่คุ้มครอง" / ⚠️ "conditional"
 - บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
 - คำอธิบาย 2-3 ประโยค: เหตุผลและเงื่อนไข
 
-**2️⃣ คำถามเรื่องวงเงิน/จำนวนเงิน (เช่น "วงเงินประกันเท่าไหร่", "จ่ายสูงสุดเท่าไร"):**
+**2️ คำถามเรื่องวงเงิน/จำนวนเงิน (เช่น "วงเงินประกันเท่าไหร่", "จ่ายสูงสุดเท่าไร"):**
 - บรรทัดแรก: "วงเงิน [จำนวนเงิน] บาท"
 - บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
 - คำอธิบายสั้น: รายละเอียดเพิ่มเติม (ถ้ามี)
 
-**3️⃣ คำถามเรื่องเบี้ยประกัน/ค่าใช้จ่าย:**
+**3️ คำถามเรื่องเบี้ยประกัน/ค่าใช้จ่าย:**
 - บรรทัดแรก: "เบี้ยประกัน [จำนวนเงิน] บาท/[งวด]"
 - บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
 - คำอธิบายสั้น: เงื่อนไขการจ่าย
 
-**4️⃣ คำถามทั่วไป/รายละเอียดอื่นๆ:**
+**4️ คำถามทั่วไป/รายละเอียดอื่นๆ:**
 - เริ่มด้วยคำตอบโดยตรง
 - ระบุแหล่งที่มา (กรมธรรม์)
 - อธิบายสั้นๆ 2-4 ประโยค
 
-⚠️ หลักการสำคัญ:
+  หลักการสำคัญ:
 1. **ให้ความสำคัญกับเอกสารผู้ใช้ (👤) เป็นอันดับแรก** - นี่คือกรมธรรม์จริง
 2. **เริ่มด้วยคำตอบเสมอ** - อย่าขึ้นต้นด้วย "จากข้อมูล..." หรือ "ตามเอกสาร..."
 3. **ตอบสั้น 3-6 ประโยค** - ไม่เกิน 10 ประโยค
 4. **ระบุชื่อกรมธรรม์เสมอ** - บอกว่าข้อมูลมาจากกรมธรรม์ไหน
 5. **มุ่งเน้นตามคำถาม** - ถ้าถามอุบัติเหตุก็ตอบอุบัติเหตุ อย่าพูดถึงโรค
 
-❌ อย่าทำ:
+  อย่าทำ:
 - อย่าเขียนยาวเกิน 10 ประโยค
 - อย่าพูดนอกเรื่อง (ถามอุบัติเหตุแต่ตอบเรื่องโรค)
 - อย่าแนะนำให้ส่งเอกสารเพิ่ม ถ้ามีข้อมูลพอตอบ
@@ -308,7 +308,7 @@ class RAGService {
     } else {
       systemMessage += `You are a Thai insurance assistant specializing in accident coverage assessment.
 
-📋 Response Format (Keep it SHORT and DIRECT):
+ Response Format (Keep it SHORT and DIRECT):
 
 **First Line - Clear Answer:**
 ✅ "คุ้มครอง" (Covered) - if insurance pays
@@ -323,7 +323,7 @@ class RAGService {
 - Important conditions (if any)
 - Reference policy clause (if available)
 
-⚠️ Key Rules:
+  Key Rules:
 1. Prioritize user documents (👤) - these are real policies
 2. **Answer SHORT, CONCISE, CLEAR** - don't write long
 3. **Start with answer** - covered/not covered/conditional
@@ -445,7 +445,7 @@ class RAGService {
       `• ${doc.title} (${(doc.similarity * 100).toFixed(1)}% เกี่ยวข้อง)`
     ).join('\n');
     
-    return `\n\n📚 แหล่งข้อมูลที่ใช้:\n${citations}`;
+    return `\n\n แหล่งข้อมูลที่ใช้:\n${citations}`;
   }
 
   /**

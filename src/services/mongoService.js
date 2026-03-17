@@ -330,7 +330,7 @@ class MongoService {
       });
 
       if (!document) {
-        console.log(` Document ${documentId} not found or unauthorized for user ${userId}`);
+        console.log(`Document ${documentId} not found or unauthorized for user ${userId}`);
         return { success: false, error: 'Document not found or unauthorized' };
       }
 
@@ -355,7 +355,7 @@ class MongoService {
         return { success: false, error: 'Failed to update policy name' };
       }
     } catch (error) {
-      console.error(' Error updating document policy:', error.message);
+      console.error('Error updating document policy:', error.message);
       return { success: false, error: error.message };
     }
   }
@@ -373,7 +373,7 @@ class MongoService {
 
       return documents;
     } catch (error) {
-      console.error(' Error fetching system documents:', error.message);
+      console.error('Error fetching system documents:', error.message);
       return [];
     }
   }
@@ -397,7 +397,7 @@ class MongoService {
 
       return [...userDocs, ...systemDocs];
     } catch (error) {
-      console.error(' Error fetching all documents:', error.message);
+      console.error('Error fetching all documents:', error.message);
       return [];
     }
   }
@@ -416,10 +416,9 @@ class MongoService {
         throw new Error('อีเมลนี้ถูกใช้งานแล้ว');
       }
 
-      // Create user with simple password (you can add crypto.createHash if you want basic hashing)
       const user = {
         email,
-        password, // Simple password storage
+        password, 
         name: name || email.split('@')[0],
         createdAt: new Date()
       };
@@ -435,7 +434,7 @@ class MongoService {
         }
       };
     } catch (error) {
-      console.error(' Registration error:', error);
+      console.error('Registration error:', error);
       throw error;
     }
   }
@@ -466,7 +465,7 @@ class MongoService {
         }
       };
     } catch (error) {
-      console.error(' Login error:', error);
+      console.error('Login error:', error);
       throw error;
     }
   }
@@ -518,7 +517,7 @@ class MongoService {
         messageCount: conv.messages ? conv.messages.length : 0
       }));
     } catch (error) {
-      console.error(' Error getting conversations:', error);
+      console.error('Error getting conversations:', error);
       throw error;
     }
   }
@@ -538,7 +537,7 @@ class MongoService {
       };
       
       const result = await conversationsCollection.insertOne(newConversation);
-      console.log('✅ Conversation created:', result.insertedId);
+      console.log('Conversation created:', result.insertedId);
       
       return {
         _id: result.insertedId.toString(),
@@ -546,7 +545,7 @@ class MongoService {
         ...newConversation
       };
     } catch (error) {
-      console.error(' Error creating conversation:', error);
+      console.error('Error creating conversation:', error);
       throw error;
     }
   }
@@ -581,7 +580,7 @@ class MongoService {
         updatedAt: conversation.updatedAt
       };
     } catch (error) {
-      console.error('❌ Error getting conversation messages:', error);
+      console.error('Error getting conversation messages:', error);
       throw error;
     }
   }
@@ -624,10 +623,10 @@ class MongoService {
         }
       );
       
-      console.log('✅ Message added to conversation:', conversationId);
+      console.log('Message added to conversation:', conversationId);
       return result;
     } catch (error) {
-      console.error('❌ Error adding message to conversation:', error);
+      console.error('Error adding message to conversation:', error);
       throw error;
     }
   }
@@ -654,10 +653,10 @@ class MongoService {
         throw new Error('ไม่พบการสนทนาหรือไม่มีสิทธิ์ลบ');
       }
       
-      console.log('✅ Conversation deleted:', conversationId);
+      console.log('Conversation deleted:', conversationId);
       return result;
     } catch (error) {
-      console.error('❌ Error deleting conversation:', error);
+      console.error('Error deleting conversation:', error);
       throw error;
     }
   }

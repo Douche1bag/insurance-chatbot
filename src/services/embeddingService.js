@@ -76,7 +76,7 @@ class EmbeddingService {
     try {
       const messageEmbedding = await this.generateEmbedding(message);
       const responseEmbedding = await this.generateEmbedding(response);
-      
+      Í
       return await mongoService.storeChatMessage(
         userId, 
         message, 
@@ -114,7 +114,7 @@ class EmbeddingService {
       console.log(`🔍 Searching for content similar to: "${query}"`);
       const queryEmbedding = await this.generateEmbedding(query);
       
-      // Try vector search first (requires Atlas Search index)
+      // Try vector search first 
       try {
         const results = await mongoService.vectorSearch(queryEmbedding, limit);
         console.log(`Vector search returned ${results.length} results`);
