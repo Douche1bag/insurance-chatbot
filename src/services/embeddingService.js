@@ -6,7 +6,7 @@ class EmbeddingService {
     this.baseUrl = process.env.VITE_API_BASE_URL;
   }
 
-  // Generate text embeddings using Typhoon API (with fallback)
+  // DIDNT used
   async generateEmbedding(text) {
     try {
       const response = await fetch(`${this.baseUrl}/embeddings`, {
@@ -36,9 +36,8 @@ class EmbeddingService {
     }
   }
 
-  // Fallback: Generate a simple numeric representation (384 dims to match system docs)
+  // Generate a simple numeric representation (384 dims to match system docs)
   generateSimpleEmbedding(text, dimensions = 384) {
-    // Safety check for undefined/null text
     if (!text || typeof text !== 'string') {
       console.warn('Invalid text for embedding, using empty string');
       text = '';
@@ -58,7 +57,7 @@ class EmbeddingService {
     return embedding.map(val => magnitude > 0 ? val / magnitude : 0);
   }
 
-  // Calculate cosine similarity between two vectors
+  // Calculate cosine similarity between two vectors incased vector ssearch is not used
   cosineSimilarity(vecA, vecB) {
     if (vecA.length !== vecB.length) {
       throw new Error('Vectors must have the same dimension');
@@ -122,7 +121,7 @@ class EmbeddingService {
       } catch (vectorError) {
         console.warn('Vector search not available, using fallback method');
         
-        // Fallback: Manual similarity calculation
+        // else: Manual similarity calculation
         const results = await this.manualSimilaritySearch(queryEmbedding, limit);
         console.log(`Manual search returned ${results.length} results`);
         return results;
@@ -214,6 +213,38 @@ class EmbeddingService {
         return [];
       }
       
+      // If the query references a specific uploaded filename (e.g., AIA01.png, IMG_8790.JPG),
+      // force-include exact matches first. This makes table lookups deterministic.
+      const filenameTokens = Array.from(
+        new Set((query.match(/\b(?:AIA\d{1,3}|IMG_\d{3,6})(?:\.(?:png|jpg|jpeg))?\b/gi) || [])
+          .map(t => t.toLowerCase()))
+      );
+      if (filenameTokens.length > 0) {
+        const exactFileMatches = userDocuments.filter(doc => {
+          const title = (doc.title || '').toString().toLowerCase();
+          const originalName = (doc.metadata?.originalName || '').toString().toLowerCase();
+          return filenameTokens.some(tok => {
+            const withExt = tok.includes('.') ? tok : `${tok}.png`;
+            return title.includes(tok) || originalName.includes(tok) || title.includes(withExt) || originalName.includes(withExt);
+          });
+        });
+        
+        if (exactFileMatches.length > 0) {
+          console.log(`Found ${exactFileMatches.length} exact filename match(es): ${filenameTokens.join(', ')}`);
+          const forced = exactFileMatches.map(doc => ({
+            ...doc,
+            similarity: 1.0,
+            score: 1.0,
+            source: 'user_upload'
+          }));
+          
+          // If we already have enough forced matches, return them
+          if (forced.length >= limit) return forced.slice(0, limit);
+          
+          // Otherwise, continue and fill remaining slots with similarity search results
+        }
+      }
+
       // Check if query contains a policy number
       const policyNumberMatch = query.match(/(\d{7,10})/);
       if (policyNumberMatch) {
@@ -255,13 +286,33 @@ class EmbeddingService {
       const sortedResults = similarities
         .sort((a, b) => b.similarity - a.similarity)
         .slice(0, limit);
+
+      // forced merge filename that  matches (if present) with similarity results, de-duping by _id
+      const forcedIds = new Set();
+      const forcedFromQuery = (filenameTokens.length > 0)
+        ? userDocuments
+          .filter(doc => {
+            const title = (doc.title || '').toString().toLowerCase();
+            const originalName = (doc.metadata?.originalName || '').toString().toLowerCase();
+            return filenameTokens.some(tok => {
+              const withExt = tok.includes('.') ? tok : `${tok}.png`;
+              return title.includes(tok) || originalName.includes(tok) || title.includes(withExt) || originalName.includes(withExt);
+            });
+          })
+          .map(doc => {
+            forcedIds.add(doc._id?.toString?.() ?? doc._id);
+            return { ...doc, similarity: 1.0, score: 1.0, source: 'user_upload' };
+          })
+        : [];
+      
+      const merged = [...forcedFromQuery, ...sortedResults.filter(doc => !forcedIds.has(doc._id?.toString?.() ?? doc._id))].slice(0, limit);
       
       console.log(`User search completed, returning ${sortedResults.length} results`);
       if (sortedResults.length > 0) {
         console.log(`Top user doc scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
       }
       
-      return sortedResults;
+      return merged;
     } catch (error) {
       console.error(' Error finding similar user content:', error.message);
       return [];

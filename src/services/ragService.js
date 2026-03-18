@@ -5,8 +5,8 @@ class RAGService {
   constructor() {
     this.similarityThreshold = 0.2; // Minimum similarity score (lowered to 20% for better recall)
     this.maxContextLength = 2000; // Maximum characters for context
-    this.defaultContextLimit = 3; // Default number of similar documents to retrieve
-    this.maxChunkLength = 600; // Maximum length per chunk in context
+    this.defaultContextLimit = 3; 
+    this.maxChunkLength = 600; // Maximum length per chunk in context if too much the typhoon gonna blown up
   }
 
   /**
@@ -22,6 +22,49 @@ class RAGService {
     cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '"$1"');
     
     return cleaned;
+  }
+
+
+  normalizePolicySourceLine(text, contextDocs = []) {
+    if (!text) return text;
+
+    const pickBestPolicyName = () => {
+      if (!Array.isArray(contextDocs) || contextDocs.length === 0) return '';
+      // Prioritize user documents
+      const bestUserDoc = contextDocs.find(d => (d?.source || '').toLowerCase() === 'user' && d?.policyName);
+      const bestAnyDoc = contextDocs.find(d => d?.policyName);
+      const policyName = (bestUserDoc?.policyName || bestAnyDoc?.policyName || '').toString().trim();
+      return policyName;
+    };
+
+    const bestPolicyName = pickBestPolicyName();
+    const fallbackTitle = 'นี่คือข้อมูลของระบบโปรดตรวจสอบกรมธรรม์ของคุณอีกครั้ง';
+
+    const shouldReplaceBracket = (bracketText) => {
+      const t = (bracketText || '').toString();
+      return /ชื่อกรมธรรม์|ไม่ระบุ|ไม่มีชื่อ|unknown|not\s*specified/i.test(t);
+    };
+
+    const replaceThai = (input) => {
+      return input.replace(/จากกรมธรรม์\s*\[([^\]]+)\]/g, (match, bracketText) => {
+        if (!shouldReplaceBracket(bracketText)) return match;
+        return `จากกรมธรรม์ ${bestPolicyName || fallbackTitle}`;
+      });
+    };
+
+    const replaceEnglish = (input) => {
+      return input.replace(/From policy\s*\[([^\]]+)\]/gi, (match, bracketText) => {
+        if (!shouldReplaceBracket(bracketText)) return match;
+        return `From policy ${bestPolicyName || fallbackTitle}`;
+      });
+    };
+
+    // If the model outputs "จากกรมธรรม์" without any name at all, fill it in.
+    const fillBareThai = (input) => {
+      return input.replace(/^(\s*จากกรมธรรม์)\s*$/gm, `$1 ${bestPolicyName || fallbackTitle}`);
+    };
+
+    return fillBareThai(replaceEnglish(replaceThai(text)));
   }
 
   /**
@@ -55,6 +98,25 @@ class RAGService {
       
       // Step 1: Retrieve relevant context with priority (user docs first)
       const contextData = await this.retrievePrioritizedContext(userQuery, contextLimit, userId);
+
+      // Strict mode: if the request is tied to a user, NEVER pass non-user docs to the model.
+      // This guarantees "only this user's uploads" behavior (no system docs, no other users).
+      if (userId && contextData?.context?.length) {
+        const userOnly = contextData.context.filter(d => d?.source === 'user');
+        contextData.context = userOnly;
+        contextData.userContextCount = userOnly.length;
+        contextData.systemContextCount = 0;
+      }
+
+      // Hard-guard: for amount/premium queries, ensure we NEVER pass system docs to the model
+      // even if queryType detection upstream changes or documents are mis-labeled.
+      if (this.isAmountOrPremiumQuery(userQuery) && contextData?.context?.length) {
+        const userOnly = contextData.context.filter(d => d?.source === 'user');
+        contextData.context = userOnly;
+        contextData.userContextCount = userOnly.length;
+        contextData.systemContextCount = 0;
+        contextData.queryType = 'amount-premium';
+      }
       
       // Add similar past chats to context data
       contextData.similarChats = similarPastChats;
@@ -64,12 +126,13 @@ class RAGService {
       
       // Clean response formatting
       const cleanedResponse = this.cleanResponseFormatting(response.message);
+      const normalizedResponse = this.normalizePolicySourceLine(cleanedResponse, contextData.context);
       
       // Step 3: Return complete RAG result
       return {
         success: true,
         query: userQuery,
-        response: cleanedResponse,
+        response: normalizedResponse,
         context: contextData.context,
         metadata: {
           contextFound: contextData.context.length > 0,
@@ -86,13 +149,32 @@ class RAGService {
         success: false,
         query: userQuery,
         error: error.message,
-        fallbackResponse: this.cleanResponseFormatting(await this.generateFallbackResponse(userQuery, language))
+        fallbackResponse: this.normalizePolicySourceLine(
+          this.cleanResponseFormatting(await this.generateFallbackResponse(userQuery, language)),
+          []
+        )
       };
     }
   }
 
   /**
+   * Check if query is about amount or premium (user documents only)
+   */
+  isAmountOrPremiumQuery(query) {
+    const amountKeywords = [
+      'วงเงิน', 'จำนวนเงิน', 'ทุนประกัน', 'เบี้ยประกัน', 'ค่าใช้จ่าย','เบี้ย',
+      'จ่ายสูงสุด', 'จ่ายเท่าไหร่', 'ราคา', 'ต้องจ่าย', 'จ่ายเท่าไร',
+      'เสียชีวิต', 'ค่าชดเชย', 'ผลประโยชน์', 'สินไหม', 'เงินเอาประกันภัย',
+      'amount', 'limit', 'premium', 'cost', 'price', 'maximum'
+    ];
+    
+    return amountKeywords.some(keyword => query.toLowerCase().includes(keyword.toLowerCase()));
+  }
+
+  /**
    * Retrieve prioritized context (user documents first, then system documents)
+   * user+sys =5 where this 5 find similarity of the top 3 and used if relevant lessthan that used only relavant
+   * CRITICAL: For amount/premium questions, return ONLY user documents
    */
   async retrievePrioritizedContext(query, limit = 5, userId = null) {
     try {
@@ -101,13 +183,16 @@ class RAGService {
       let userContextCount = 0;
       let systemContextCount = 0;
       
-      // Check if query is about coverage or amounts (special handling)
+      // Check query type: coverage/general vs amount/premium
+      const isAmountOrPremium = this.isAmountOrPremiumQuery(query);
       const isCoverageQuery = this.isCoverageOrAmountQuery(query);
-      const searchLimit = isCoverageQuery ? limit * 1.5 : limit; // Search slightly more docs for coverage queries
+      
+      console.log(`Query Type: ${isAmountOrPremium ? ' Amount/Premium (USER ONLY)' : isCoverageQuery ? 'Coverage Query' : 'General'}`);
       
       // Priority 1: Search user documents if userId provided
       if (userId) {
         try {
+          const searchLimit = isCoverageQuery ? limit * 1.5 : limit;
           const userSimilar = await embeddingService.findSimilarUserContent(query, userId, searchLimit);
           const relevantUserDocs = userSimilar.filter(doc => {
             const score = doc.similarity || doc.score || 0;
@@ -117,30 +202,24 @@ class RAGService {
           });
           userDocs = relevantUserDocs.slice(0, limit);
           userContextCount = userDocs.length;
-          console.log(`👤 Found ${userContextCount} relevant user documents (coverage query: ${isCoverageQuery})`);
+          console.log(`👤 Found ${userContextCount} relevant user documents`);
         } catch (userError) {
-          console.log('🔍 No user documents found, proceeding to system docs');
+          console.log('🔍 No user documents found');
         }
       }
       
-      // Priority 2: Search system documents if we need more context
+      // Priority 2: Search system documents - BUT ONLY IF NOT amount/premium question
       const remaining = Math.max(0, limit - userDocs.length);
-      if (remaining > 0) {
-        try {
-          const systemSimilar = await embeddingService.findSimilarContent(query, remaining * 2);
-          const relevantSystemDocs = systemSimilar.filter(doc => {
-            const score = doc.similarity || doc.score || 0;
-            return score >= this.similarityThreshold;
-          });
-          systemDocs = relevantSystemDocs.slice(0, remaining);
-          systemContextCount = systemDocs.length;
-          console.log(`Found ${systemContextCount} relevant system documents`);
-        } catch (systemError) {
-          console.error('Error searching system documents:', systemError.message);
-        }
+      
+      // IMPORTANT: This app is configured to use ONLY user-uploaded documents for RAG.
+      // We intentionally do NOT fall back to system documents for ANY query type.
+      if (isAmountOrPremium) {
+        console.log('Amount/Premium query - using user docs only (system docs disabled)');
+      } else {
+        console.log('User-docs-only mode - system documents disabled');
       }
       
-      // Combine user docs (priority) + system docs (fallback)
+      // Combine user docs (priority) + system docs (fallback only for coverage/general)
       const allDocs = [...userDocs, ...systemDocs];
       
       // Prepare context with content truncation and source marking
@@ -152,18 +231,21 @@ class RAGService {
         id: doc._id || doc.id,
         source: doc.userId ? 'user' : 'system', // Mark document source
         sourceIcon: doc.userId ? '👤' : '🏛️',
+        policyName: doc.metadata?.policyName || 'ไม่ระบุชื่อกรมธรรม์', // Include policy name from metadata
         isChunked: doc.metadata?.isChunked || false,
         chunkInfo: doc.metadata?.isChunked ? ` [${doc.metadata.chunkIndex + 1}/${doc.metadata.totalChunks}]` : ''
       }));
       
-      console.log(`Retrieved ${contextDocs.length} total documents (${userContextCount} user + ${systemContextCount} system)`);
+      console.log(`✅ Retrieved ${contextDocs.length} total documents (${userContextCount} user + ${systemContextCount} system)`);
       
       return {
         context: contextDocs,
         userContextCount,
         systemContextCount,
         totalFound: allDocs.length,
-        query: query
+        query: query,
+        queryType: isAmountOrPremium ? 'amount-premium' : isCoverageQuery ? 'coverage' : 'general',
+        userId: userId || null
       };
     } catch (error) {
       console.error('Error retrieving prioritized context:', error.message);
@@ -172,7 +254,9 @@ class RAGService {
         userContextCount: 0,
         systemContextCount: 0,
         totalFound: 0, 
-        query 
+        query,
+        queryType: 'unknown',
+        userId: userId || null
       };
     }
   }
@@ -240,9 +324,13 @@ class RAGService {
    */
   buildSystemMessage(contextData, language = 'thai-english', recentMessages = []) {
     let systemMessage;
+    const isUserOnlyQuery = contextData?.queryType === 'amount-premium';
+    const isUserScoped = !!contextData?.userId;
     
     // Add conversation context if available
-    if (recentMessages && recentMessages.length > 0) {
+    // IMPORTANT: For amount/premium queries, do NOT use prior conversation
+    // (it may contain system-derived info and must not override uploaded docs).
+    if (!isUserOnlyQuery && recentMessages && recentMessages.length > 0) {
       const conversationContext = language === 'thai-english' ? 
         '\n\n💬 บทสนทนาที่ผ่านมา:' : 
         '\n\n💬 Recent Conversation:';
@@ -278,15 +366,17 @@ class RAGService {
 - บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
 - คำอธิบาย 2-3 ประโยค: เหตุผลและเงื่อนไข
 
-**2️ คำถามเรื่องวงเงิน/จำนวนเงิน (เช่น "วงเงินประกันเท่าไหร่", "จ่ายสูงสุดเท่าไร"):**
-- บรรทัดแรก: "วงเงิน [จำนวนเงิน] บาท"
+**2️ คำถามเรื่องวงเงิน/จำนวนเงิน (ONLY if information exists):**
+- บรรทัดแรก: "วงเงิน [จำนวนเงิน] บาท" **(เฉพาะเมื่อมีข้อมูลในเอกสาร)**
 - บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
 - คำอธิบายสั้น: รายละเอียดเพิ่มเติม (ถ้ามี)
+- **ถ้าไม่มีข้อมูลวงเงินในเอกสาร ให้ตอบว่า "ข้อมูลวงเงินไม่พบในเอกสาร"**
 
-**3️ คำถามเรื่องเบี้ยประกัน/ค่าใช้จ่าย:**
-- บรรทัดแรก: "เบี้ยประกัน [จำนวนเงิน] บาท/[งวด]"
+**3️ คำถามเรื่องเบี้ยประกัน/ค่าใช้จ่าย (ONLY if information exists):**
+- บรรทัดแรก: "เบี้ยประกัน [จำนวนเงิน] บาท/[งวด]" **(เฉพาะเมื่อมีข้อมูลในเอกสาร)**
 - บรรทัดที่สอง: "จากกรมธรรม์ [ชื่อกรมธรรม์]"
 - คำอธิบายสั้น: เงื่อนไขการจ่าย
+- **ถ้าไม่มีข้อมูลเบี้ยในเอกสาร ให้ตอบว่า "ข้อมูลเบี้ยประกันไม่พบในเอกสาร"**
 
 **4️ คำถามทั่วไป/รายละเอียดอื่นๆ:**
 - เริ่มด้วยคำตอบโดยตรง
@@ -308,7 +398,7 @@ class RAGService {
     } else {
       systemMessage += `You are a Thai insurance assistant specializing in accident coverage assessment.
 
- Response Format (Keep it SHORT and DIRECT):
+📋 Response Format (Keep it SHORT and DIRECT):
 
 **First Line - Clear Answer:**
 ✅ "คุ้มครอง" (Covered) - if insurance pays
@@ -323,12 +413,50 @@ class RAGService {
 - Important conditions (if any)
 - Reference policy clause (if available)
 
-  Key Rules:
+⚠️ Key Rules:
 1. Prioritize user documents (👤) - these are real policies
 2. **Answer SHORT, CONCISE, CLEAR** - don't write long
 3. **Start with answer** - covered/not covered/conditional
 4. **Focus on accidents** - don't mention diseases unless asked
 5. **Cite policy name** - specify which policy`;
+    }
+    
+    if (isUserOnlyQuery) {
+      systemMessage += language === 'thai-english'
+        ? `\n\n❗กฎสำคัญเพิ่มเติมสำหรับคำถาม "วงเงิน/จำนวนเงิน" และ "เบี้ยประกัน/ค่าใช้จ่าย":\n- ใช้ข้อมูลจากเอกสารผู้ใช้ (👤) เท่านั้น\n- ห้ามใช้ข้อมูลระบบ (🏛️), ความรู้ทั่วไป, หรือบทสนทนาเดิมเพื่อเดาตัวเลข\n- ถ้าเอกสารผู้ใช้ไม่มีตัวเลขที่ถาม ให้ตอบว่า "ข้อมูลวงเงิน/เบี้ยประกันไม่พบในเอกสารที่แนบมา"`
+        : `\n\n❗Additional strict rule for amount/premium questions:\n- Use ONLY user documents (👤)\n- Do NOT use system docs (🏛️), general knowledge, or prior chat to guess numbers\n- If the uploaded docs don't contain the requested number, say it is not found in the uploaded documents.`;
+
+      systemMessage += language === 'thai-english'
+        ? `\n- ✅ อนุญาตให้ "คำนวณ" ได้ เฉพาะเมื่อมีตัวเลขครบในเอกสารผู้ใช้ เช่น เบี้ย/ปี และจำนวนปี: ให้แสดงวิธีคิดสั้นๆ (เช่น 100,000 × 15 = 1,500,000)\n- ❌ ห้ามสมมติค่าที่ไม่มีในเอกสาร (เช่น อัตราผลตอบแทน, ตารางมูลค่าเวนคืน, โบนัส)`
+        : `\n- ✅ You MAY do arithmetic ONLY when all required numbers are present in the user docs; show a short formula.\n- ❌ Do NOT assume missing values (no rates, surrender tables, bonuses, etc.).`;
+
+      // Critical: prevent the common hallucination "premium × years = death benefit"
+      systemMessage += language === 'thai-english'
+        ? `\n- ❌ ห้ามสรุปว่า "เบี้ยรวม (เบี้ย×ปี)" = "ทุนประกัน/ผลประโยชน์กรณีเสียชีวิต" เว้นแต่เอกสารระบุชัดเจนว่าเท่ากัน\n- ✅ ถ้าคำถามถาม "เสียชีวิตได้กี่บาท/ทุนประกันเท่าไหร่" ให้ตอบตามช่อง "ผลประโยชน์กรณีเสียชีวิต/เงินเอาประกันภัย" ในตารางของเอกสารเท่านั้น`
+        : `\n- ❌ Never assume "total premium paid (premium×years)" equals "sum assured / death benefit" unless the document explicitly states so.\n- ✅ For death benefit / sum assured questions, answer ONLY from the document's stated death benefit / sum assured fields (often in a benefits table).`;
+
+      // ── AIA-specific mapping guidance (FIXED) ──────────────────────────────
+      systemMessage += language === 'thai-english'
+        ? `\n- 🔎 ถ้าเอกสารมีตาราง "โครงการ 1/2/3" หรือ "จำนวนเงินเอาประกันภัยรวม 100,000 / 150,000 / 200,000":
+  - ⚠️ กฎสำคัญ: ตัวเลข 100,000 / 150,000 / 200,000 ในเอกสาร AIA15PAY30 คือ "จำนวนเงินเอาประกันภัย (Sum Assured)" ไม่ใช่เบี้ยรายปี เพราะเบี้ยจริงอยู่ในตารางเบี้ย (หลักร้อย-พัน บาท/เดือน)
+  - ถ้าผู้ใช้พูดว่า "จ่ายเบี้ยปีละ 100,000" หรือ "เบี้ย 100,000" ให้ตีความว่าผู้ใช้เลือก "โครงการ 1 จำนวนเงินเอาประกันภัย 100,000 บาท" แล้วตอบผลประโยชน์จากตารางโครงการ 1
+  - สำหรับ "เสียชีวิตปีที่ X ได้กี่บาท" ในโครงการ 1 (Sum Assured 100,000) ให้แจกแจงตามสาเหตุการเสียชีวิต:
+    * เสียชีวิตปกติ/โรคภัย/ไข้เจ็บ = 100,000 บาท (จำนวนเงินเอาประกันภัย)
+    * เสียชีวิตจากอุบัติเหตุทั่วไป = 100,000 + 100,000 (ADD/RCC) = 200,000 บาท
+    * เสียชีวิตจากอุบัติเหตุสาธารณภัย (รถ, รถไฟ, ลิฟท์ฯ) = 100,000 + 200,000 (ADD สาธารณภัย) = 300,000 บาท
+    * บวกเพิ่ม HB 500 บาท/วัน หากต้องรักษาตัวในโรงพยาบาล (สูงสุด 365 วัน)
+  - เช่นเดียวกันสำหรับโครงการ 2 (150,000) และโครงการ 3 (200,000) ให้คูณสัดส่วนตาม Sum Assured ของโครงการนั้น
+  - ถ้าผู้ใช้ถามถึงเบี้ยจริงๆ (ต้องการทราบว่าต้องจ่ายเบี้ยเท่าไหร่): ต้องใช้ตารางเบี้ย ซึ่งต้องรู้ อายุ/เพศ ถ้าไม่มีข้อมูลดังกล่าวในคำถาม ให้ถามผู้ใช้ก่อน`
+        : `\n- 🔎 AIA15PAY30 Plan Tables — CRITICAL RULE:
+  - ⚠️ 100,000 / 150,000 / 200,000 in AIA15PAY30 docs = Sum Assured (จำนวนเงินเอาประกันภัย), NOT annual premium. Actual premiums are hundreds of baht/month per the separate premium rate table.
+  - If user says "pay premium 100,000/year" or "premium 100,000" → interpret as: user chose Plan 1 (Sum Assured = 100,000 baht). Answer benefits from Plan 1 column.
+  - For "death in year X" under Plan 1 (Sum Assured 100,000), break down by cause:
+    * Natural / illness death = 100,000 baht
+    * General accidental death = 100,000 + 100,000 (ADD/RCC rider) = 200,000 baht
+    * Public accident death (bus, train, lift, etc.) = 100,000 + 200,000 (public ADD) = 300,000 baht
+    * Plus HB rider: 500 baht/day if hospitalized (max 365 days)
+  - Same logic applies to Plan 2 (150,000) and Plan 3 (200,000) — scale benefits proportionally.
+  - If user genuinely asks about the actual monthly/annual premium cost: requires age + sex from the rate table. If not provided, ask the user before answering.`;
     }
 
     if (contextData.context && contextData.context.length > 0) {
@@ -342,7 +470,8 @@ class RAGService {
         const similarityPercent = (doc.similarity * 100).toFixed(1);
         const sourceLabel = doc.source === 'user' ? '👤 เอกสารผู้ใช้' : '🏛️ ข้อมูลระบบ';
         const chunkLabel = doc.chunkInfo || '';
-        systemMessage += `\n\n${index + 1}. ${doc.sourceIcon} ${doc.title}${chunkLabel} [${sourceLabel}]\n   📝 เนื้อหา: ${doc.content}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
+        const policyLabel = doc.policyName ? ` (${doc.policyName})` : '';
+        systemMessage += `\n\n${index + 1}. ${doc.sourceIcon} ${doc.title}${policyLabel}${chunkLabel} [${sourceLabel}]\n   📝 เนื้อหา: ${doc.content}\n   🎯 ความเกี่ยวข้อง: ${similarityPercent}%`;
       });
       
       const instruction = language === 'thai-english' ? 
@@ -353,7 +482,9 @@ class RAGService {
     }
     
     // Add similar past conversations if available
-    if (contextData.similarChats && contextData.similarChats.length > 0) {
+    // IMPORTANT: For amount/premium queries, do NOT include similar chats
+    // (they may contain system-derived answers and must not influence numeric outputs).
+    if (!isUserOnlyQuery && contextData.similarChats && contextData.similarChats.length > 0) {
       const similarChatsSection = language === 'thai-english' ? 
         '\n\n🔍 บทสนทนาที่คล้ายกันในอดีต:' : 
         '\n\n🔍 Similar Past Conversations:';
@@ -378,9 +509,17 @@ class RAGService {
     }
     
     if ((contextData.context && contextData.context.length === 0) && (!contextData.similarChats || contextData.similarChats.length === 0)) {
-      const noDataMessage = language === 'thai-english' ? 
-        '\n\n ไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญสำหรับข้อมูลที่แม่นยำ' :
-        '\n\n No relevant information found in database. Please answer based on general insurance knowledge and recommend consulting an expert for accurate information';
+      const noDataMessage = isUserOnlyQuery
+        ? (language === 'thai-english'
+          ? '\n\n ไม่พบข้อมูลที่เกี่ยวข้องในเอกสารผู้ใช้ (👤) ที่แนบมา: กรุณาตอบว่า "ข้อมูลวงเงิน/เบี้ยประกันไม่พบในเอกสารที่แนบมา" และอย่าคาดเดาตัวเลข'
+          : '\n\n No relevant info found in uploaded user documents (👤). Reply that the amount/premium is not found in the uploaded documents and do not guess numbers.')
+        : (isUserScoped
+          ? (language === 'thai-english'
+            ? '\n\n ไม่พบข้อมูลที่เกี่ยวข้องในเอกสารที่คุณอัปโหลด (👤) สำหรับบัญชีนี้ จึงไม่สามารถตอบจากข้อมูลอื่นได้'
+            : '\n\n No relevant information found in YOUR uploaded documents (👤) for this account, so do not use other sources.')
+          : (language === 'thai-english'
+            ? '\n\n ไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญสำหรับข้อมูลที่แม่นยำ'
+            : '\n\n No relevant information found in database. Please answer based on general insurance knowledge and recommend consulting an expert for accurate information'));
       
       systemMessage += noDataMessage;
     }
@@ -404,20 +543,19 @@ class RAGService {
 
       return response.success ? response.message : 'ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง';
     } catch (error) {
-      console.error('❌ Fallback response error:', error.message);
+      console.error('Fallback response error:', error.message);
       return 'ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง';
     }
   }
 
   /**
-   * Check if query is about coverage or insurance amounts
+   * Check if query is about coverage or general insurance questions
    */
   isCoverageOrAmountQuery(query) {
     const coverageKeywords = [
-      'ความคุ้มครอง', 'คุ้มครอง', 'วงเงิน', 'จำนวนเงิน',
-      'ทุนประกัน', 'เบี้ยประกัน', 'ค่าใช้จ่าย', 'จ่ายสูงสุด',
-      'จ่ายเท่าไหร่', 'ได้เงิน', 'เคลม', 'สิทธิประโยชน์',
-      'coverage', 'amount', 'limit', 'benefit', 'claim'
+      'ความคุ้มครอง', 'คุ้มครอง', 'อุบัติเหตุ', 'โรค', 'ป่วย', 'พิการ',
+      'สิทธิประโยชน์', 'สิทธิ', 'เคลม', 'โครง', 'ซ่อม',
+      'coverage', 'accident', 'disease', 'illness', 'disability', 'benefit', 'claim'
     ];
     
     return coverageKeywords.some(keyword => query.toLowerCase().includes(keyword.toLowerCase()));
@@ -498,4 +636,3 @@ class RAGService {
 }
 
 export default new RAGService();
-
