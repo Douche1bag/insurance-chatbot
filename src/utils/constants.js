@@ -15,7 +15,7 @@ export const API_CONFIG = {
   baseUrl: getEnvVar('VITE_API_BASE_URL', 'https://api.opentyphoon.ai/v1'),
   apiKey: getEnvVar('VITE_API_KEY'),
   model: getEnvVar('VITE_MODEL_NAME', 'typhoon-v2.5-30b-a3b-instruct'),
-  maxTokens: 8000, // Increased to handle longer context with conversation history and semantic search
+  maxTokens: 9000, // Reduced to leave room for prompt (total context window ~12k tokens)
   temperature: 0.6
 };
 

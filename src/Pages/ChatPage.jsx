@@ -235,10 +235,16 @@ export default function ChatPage({ user }) {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || loading) return;
-    
-    const userMessage = input.trim();
+  const SUGGESTIONS = [
+    'เบี้ยกรมธรรม์เท่าไหร่',
+    'ระยะเวลาคุ้มครองกี่ปี',
+    'ถ้าเสียชีวิตได้เงินกี่บาท',
+    'เงื่อนไขกรมธรรม์และผลประโยชน์',
+  ];
+
+  const handleSend = async (overrideMessage) => {
+    const userMessage = (overrideMessage ?? input).trim();
+    if (!userMessage || loading) return;
     setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setInput('');
     setLoading(true);
@@ -432,11 +438,11 @@ export default function ChatPage({ user }) {
       <div className="flex-1 flex flex-col bg-white rounded-lg border">
         <div className="flex justify-between items-center p-4 border-b">
           <h1 className="text-xl font-bold">
-            💬 {conversations.find(c => c._id === currentConversationId)?.title || 'AI Chat'}
+             {conversations.find(c => c._id === currentConversationId)?.title || 'AI Chat'}
           </h1>
           {lastContext && (
             <div className="text-sm text-gray-500">
-              📊 {lastContext.userContextCount > 0 
+               {lastContext.userContextCount > 0 
                 ? `${lastContext.userContextCount} เอกสารของคุณ` 
                 : `${lastContext.systemContextCount} เอกสารระบบ`}
             </div>
@@ -465,7 +471,7 @@ export default function ChatPage({ user }) {
                 </div>
               ))}
               {loading && (
-                <div className="text-center text-gray-500 mb-4">
+                <div className="text-center text-gray-500 mb-4 animate-pulse">
                   🔍 กำลังค้นหาข้อมูลและประมวลผล...
                 </div>
               )}
@@ -475,6 +481,19 @@ export default function ChatPage({ user }) {
         </div>
 
         <div className="p-4 border-t">
+          {/* Suggestion chips */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {SUGGESTIONS.map((text) => (
+              <button
+                key={text}
+                onClick={() => handleSend(text)}
+                disabled={loading}
+                className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 text-blue-700 text-sm hover:bg-blue-100 disabled:opacity-50 transition-colors whitespace-nowrap"
+              >
+                {text}
+              </button>
+            ))}
+          </div>
           <div className="flex gap-2">
             <input
               type="text"

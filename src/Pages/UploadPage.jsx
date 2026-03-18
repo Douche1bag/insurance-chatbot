@@ -4,12 +4,14 @@ import React, { useState, useRef } from 'react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import ChatHeader from '../components/ChatHeader';
+import { MessageSquare, CheckCircle2 } from 'lucide-react';
 
-export default function UploadPage({ user }) {
+export default function UploadPage({ user, onNavigate }) {
   const [uploading, setUploading] = useState(false);
   const [files, setFiles] = useState([]); // Changed to array
   const [dragActive, setDragActive] = useState(false);
   const [uploadResults, setUploadResults] = useState([]); // Track each file result
+  const [showNextModal, setShowNextModal] = useState(false);
   const inputRef = useRef();
 
   const handleDrag = (e) => {
@@ -75,6 +77,7 @@ export default function UploadPage({ user }) {
     setUploadResults(initialResults);
 
     // Upload files one by one (sequential to avoid overloading the server)
+    let successCountLocal = 0;
     for (let i = 0; i < files.length; i++) {
       // Mark current file as uploading
       setUploadResults(prev =>
@@ -85,6 +88,7 @@ export default function UploadPage({ user }) {
         const result = await uploadSingleFile(files[i]);
 
         if (result.success) {
+          successCountLocal++;
           setUploadResults(prev =>
             prev.map((r, idx) => idx === i ? {
               ...r,
@@ -113,6 +117,9 @@ export default function UploadPage({ user }) {
     }
 
     setUploading(false);
+    if (successCountLocal > 0) {
+      setShowNextModal(true);
+    }
   };
 
   const clearAll = () => {
@@ -124,6 +131,7 @@ export default function UploadPage({ user }) {
   const errorCount = uploadResults.filter(r => r.status === 'error').length;
 
   return (
+    <>
     <div className="flex flex-col items-center min-h-[60vh] bg-slate-50 relative">
       <ChatHeader />
       <div className="w-full flex flex-col items-center mt-4 relative">
@@ -271,5 +279,35 @@ export default function UploadPage({ user }) {
         </div>
       </div>
     </div>
+
+      {showNextModal && (
+        <div className="fixed inset-0 left-56 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm mx-4 flex flex-col items-center gap-4">
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50">
+              <CheckCircle2 size={32} className="text-green-500" />
+            </div>
+          <h2 className="text-lg font-semibold text-slate-800">อัปโหลดเสร็จสมบูรณ์!</h2>
+            <p className="text-sm text-slate-500 text-center">
+              คุณต้องการไปที่ AI Chat เพื่อเริ่มถามคำถามเกี่ยวกับนโยบายประกันภัยของคุณเลยมั้ย?
+            </p>
+            <div className="flex gap-3 w-full mt-2">
+              <button
+                className="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 font-medium text-sm"
+                onClick={() => setShowNextModal(false)}
+              >
+                ไม่ต้องการ
+              </button>
+              <button
+                className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium text-sm flex items-center justify-center gap-2"
+                onClick={() => { setShowNextModal(false); onNavigate('chat'); }}
+              >
+                <MessageSquare size={15} />
+                ไปที่ AI Chat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
