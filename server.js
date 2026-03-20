@@ -153,7 +153,7 @@ app.post('/api/chat', async (req, res) => {
     }
     
     const result = await ragService.queryWithRAG(query, {
-      contextLimit: 3,
+      contextLimit: 5,
       language: 'thai',
       userId: userId || null,
       recentMessages // Pass conversation context
