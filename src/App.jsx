@@ -9,11 +9,15 @@ import './Styles/App.css';
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState('chat');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [user, setUser] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('user'));
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('user');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const handleLogin = (userData) => {
+    localStorage.setItem('user', JSON.stringify(userData));
     setUser(userData);
     setIsLoggedIn(true);
   };
