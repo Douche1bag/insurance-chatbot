@@ -315,7 +315,6 @@ class RAGService {
       { role: 'user',   content: query }
     ];
 
-    // Retry with exponential backoff on 429 rate limit
     const maxRetries = 3;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {

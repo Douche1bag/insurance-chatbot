@@ -259,7 +259,7 @@ class MongoService {
       const collection = db.collection('user_documents');
 
       const documents = await collection
-        .find({ userId })
+        .find({ userId, 'metadata.chunkType': { $ne: 'key_phrase' } })
         .sort({ 'metadata.createdAt': -1 })
         .limit(limit)
         .toArray();

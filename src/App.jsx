@@ -8,13 +8,23 @@ import { LayoutDashboard, Upload, MessageSquare, BarChart3, Users, LogOut } from
 import './Styles/App.css';
 
 export default function App() {
-  const [currentPage, setCurrentPage] = useState('chat');
-  const [isLoggedIn, setIsLoggedIn] = useState(() => !!localStorage.getItem('user'));
-  const [user, setUser] = useState(() => {
-    const saved = localStorage.getItem('user');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [currentPage, setCurrentPage] = useState(() => localStorage.getItem('currentPage') || 'chat');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [user, setUser] = useState(null);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+
+  // Restore session on refresh
+  useEffect(() => {
+    const savedUser = localStorage.getItem('user');
+    if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser));
+        setIsLoggedIn(true);
+      } catch {
+        localStorage.removeItem('user');
+      }
+    }
+  }, []);
 
   const handleLogin = (userData) => {
     localStorage.setItem('user', JSON.stringify(userData));
@@ -24,6 +34,7 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('user');
+    localStorage.removeItem('currentPage');
     setUser(null);
     setIsLoggedIn(false);
     setCurrentPage('chat');
@@ -46,6 +57,7 @@ export default function App() {
       setShowLogoutModal(true);
     } else {
       setCurrentPage(key);
+      localStorage.setItem('currentPage', key);
     }
   };
 
