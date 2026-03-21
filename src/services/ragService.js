@@ -5,7 +5,7 @@ class RAGService {
   constructor() {
     this.similarityThreshold = 0.2;
     this.defaultContextLimit = 8; // Increased for users with many uploaded files
-    this.maxChunkLength = 2500; // Full rate table needs ~2000 chars
+    this.maxChunkLength = 2000; // Full rate table needs ~2000 chars
     // Response cache — avoids hitting API for repeated questions
     this._cache    = new Map();
     this._cacheTTL = 30 * 60 * 1000; // 30 min
@@ -238,28 +238,48 @@ class RAGService {
         }
       }
 
-      // Cap docs sent to model to prevent token overflow
-      // Each doc can be up to 800 chars — keep total context manageable
-      const _isPremQuery = /เบี้ย|ชำระเบี้ย/.test(query);
-      const maxDocs = _isPremQuery ? 3 : 5;
-      userDocs = userDocs.slice(0, maxDocs);
-      // Re-rank docs for premium queries: prefer docs with actual baht amounts
-      // Policy terms pages mention เบี้ย many times but don't have the actual amount
-      // Receipt/schedule pages have "เบี้ยประกันภัยรวม 500 บาท" etc.
-      const _isPremAmtQuery = /ชำระเบี้ย|เบี้ยกรมธรรม์|เบี้ยประกัน(?:ภัย)?(?:รวม|งวด|เดือน|ปี)?/.test(query);
-      if (_isPremAmtQuery && userDocs.length > 1) {
-        // Boost docs that contain actual premium amounts (pattern: number + บาท near เบี้ย)
+      // Re-rank: exact age+sex match wins
+      const _premQ = /เบี้ย|ชำระเบี้ย/.test(query);
+      if (_premQ && userDocs.length > 1) {
+        // Extract age number from query e.g. "35" from "อายุ35" or "35ปี"
+        const _ageM = query.match(/อายุ\s*(\d+)|\b(\d{2})\s*ปี/);
+        const _age  = _ageM ? (_ageM[1] || _ageM[2]) : null;
+        const _male = /ชาย/.test(query);
+        const _fem  = /หญิง/.test(query);
+
         userDocs.sort((a, b) => {
-          // Match เบี้ย near an amount — allow newlines between them (OCR splits lines)
-          const amtRegex = /เบี้য[\s\S]{0,50}\d{3,6}\s*บาท|\d{3,6}\s*บาท[\s\S]{0,50}เบี้ย|เบี้ยประกัน[\s\S]{0,20}\d{3,6}/;
-          const hasAmtA = amtRegex.test(a.content || '');
-          const hasAmtB = amtRegex.test(b.content || '');
-          if (hasAmtA && !hasAmtB) return -1;
-          if (!hasAmtA && hasAmtB) return 1;
+          const ac = a.content || '', bc = b.content || '';
+          let scoreA = 0, scoreB = 0;
+
+          // +3: doc contains the exact age row e.g. "35 |" or "35\t"
+          if (_age) {
+            const ageRe = new RegExp('(^|\\s)' + _age + '\\s*[\\|\\t]');
+            if (ageRe.test(ac)) scoreA += 3;
+            if (ageRe.test(bc)) scoreB += 3;
+          }
+
+          // +2: doc is a rate table (has "ตารางข้อมูล" or "age | number" rows)
+          const rateRe = /ตารางข้อมูล|\d{2}\s*\|\s*\d{3}/;
+          if (rateRe.test(ac)) scoreA += 2;
+          if (rateRe.test(bc)) scoreB += 2;
+
+          // +1: doc mentions the requested sex
+          if (_male && /ชาย/.test(ac)) scoreA += 1;
+          if (_male && /ชาย/.test(bc)) scoreB += 1;
+          if (_fem  && /หญิง/.test(ac)) scoreA += 1;
+          if (_fem  && /หญิง/.test(bc)) scoreB += 1;
+
+          // Fallback to similarity score
+          if (scoreA !== scoreB) return scoreB - scoreA;
           return (b.similarity || 0) - (a.similarity || 0);
         });
-        console.log('Premium amount re-rank: top doc = ' + userDocs[0]?.title);
+
+        console.log('Re-rank: age=' + _age + ' sex=' + (_male ? 'M' : _fem ? 'F' : '?') + ' top=' + userDocs[0]?.title);
       }
+      const maxDocs = _premQ ? 3 : 5;
+      userDocs = userDocs.slice(0, maxDocs);
+
+
 
       const allDocs = [...userDocs, ...systemDocs];
       const contextDocs = allDocs.map(doc => ({
@@ -315,6 +335,7 @@ class RAGService {
       { role: 'user',   content: query }
     ];
 
+    // Retry with exponential backoff on 429 rate limit
     const maxRetries = 3;
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
@@ -396,7 +417,10 @@ class RAGService {
 - ✅ ตอบเฉพาะสิ่งที่มีใน context ห้ามสมมติ
 
 📌 อ่านตารางเบี้ย: อายุ | ป1ชาย | ป1หญิง | ป2ชาย | ป2หญิง | ป3ชาย | ป3หญิง
-❌ ห้ามอ่านผิดแถวหรือสับคอลัมน์ — ป1ชาย≠ป2ชาย
+วิธี: (1) ค้นหาแถวที่ขึ้นต้นด้วยเลขอายุที่ถาม เช่น "35 |"  (2) อ่านค่าตามคอลัมน์เพศ+โครงการ
+เช่น ถามอายุ 35: หา "35 |" → 35 | 867 | 844 | 1252 | 1218 | 1637 | 1591 → ป1ชาย=867 ป2ชาย=1252 ป3ชาย=1637
+❌ ห้ามใช้แถวอื่น — ถาม 35 ต้องตอบจาก "35 |" ไม่ใช่แถว 20 หรือ 40
+❌ ห้ามสับคอลัมน์ — ป1ชาย≠ป2ชาย
 - ไม่บอกเพศ → แสดงทั้งชายและหญิงจากแถวอายุนั้น
 - ไม่บอกทั้งอายุและเพศ → ถามกลับ`
     }
