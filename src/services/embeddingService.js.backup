@@ -6,8 +6,69 @@ class EmbeddingService {
     this.baseUrl = process.env.VITE_API_BASE_URL;
   }
 
-  // DIDNT used
+  // ─── TABLE CLEANING ───────────────────────────────────────────────────────
+
+  cleanTableContent(rawContent) {
+    if (!rawContent || !rawContent.toLowerCase().includes('<table')) return rawContent;
+
+    try {
+      const trBlocks = [...rawContent.matchAll(/<tr[^>]*>(.*?)<\/tr>/gsi)].map(m => m[1]);
+      if (trBlocks.length === 0) return rawContent;
+
+      const rows = trBlocks.map(tr =>
+        tr.split(/<t[dh][^>]*>/i)
+          .map(p => p.replace(/<\/t[dh]>/gi, '').replace(/<[^>]+>/g, '').trim())
+          .filter(Boolean)
+      );
+
+      let result = 'ตารางข้อมูล:\n' + '─'.repeat(80) + '\n';
+
+      for (const row of rows) {
+        const ageCell = row.find(c => /^\d{2}$/.test(c));
+        if (!ageCell) continue;
+
+        const nums = [];
+        for (const c of row) {
+          if (/^\d{2,5}(,\d{3})?$/.test(c)) {
+            const n = parseInt(c.replace(/,/g, ''), 10);
+            if (c === ageCell || n <= 600) continue;
+            nums.push(n);
+          }
+        }
+
+        const unique = [...new Set(nums)];
+        if (unique.length >= 4) {
+          result += `${ageCell} | ${unique.join(' | ')}\n`;
+        }
+      }
+
+      return result;
+    } catch (e) {
+      console.log('Table parse error:', e.message);
+      return rawContent;
+    }
+  }
+
+  // ─── PREPROCESS ──────────────────────────────────────────────────────────
+
+  preprocessContent(content) {
+    if (!content) return content;
+
+    let processed = content;
+
+    if (processed.toLowerCase().includes('<table')) {
+      processed = processed.replace(/<table[\s\S]*?<\/table>/gi, (t) => this.cleanTableContent(t));
+    }
+
+    processed = processed.replace(/<[^>]+>/g, ' ').replace(/\s{3,}/g, '\n').trim();
+    return processed;
+  }
+
+  // ─── EMBEDDING ───────────────────────────────────────────────────────────
+
   async generateEmbedding(text) {
+    const cleanText = this.preprocessContent(text);
+
     try {
       const response = await fetch(`${this.baseUrl}/embeddings`, {
         method: 'POST',
@@ -15,381 +76,186 @@ class EmbeddingService {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.apiKey}`
         },
-        body: JSON.stringify({
-          input: text,
-          model: "text-embedding-ada-002", 
-          encoding_format: "float"
-        })
+        body: JSON.stringify({ input: cleanText, model: 'text-embedding-ada-002', encoding_format: 'float' })
       });
 
       if (!response.ok) {
-        console.log(`Embedding API unavailable (${response.status}), using fallback method`);
-        return this.generateSimpleEmbedding(text);
+        console.log(`API failed (${response.status}) → fallback`);
+        return this.generateSimpleEmbedding(cleanText);
       }
 
       const data = await response.json();
       return data.data[0].embedding;
-    } catch (error) {
-      console.log(`Embedding API error (${error.message}), using fallback method`);
-      // Fallback to a simple hash-based embedding for demo purposes
-      return this.generateSimpleEmbedding(text);
+    } catch (err) {
+      console.log('Embedding error → fallback', err.message);
+      return this.generateSimpleEmbedding(cleanText);
     }
   }
 
-  // Generate a simple numeric representation (384 dims to match system docs)
-  generateSimpleEmbedding(text, dimensions = 384) {
-    if (!text || typeof text !== 'string') {
-      console.warn('Invalid text for embedding, using empty string');
-      text = '';
-    }
-    
-    const embedding = new Array(dimensions).fill(0);
-    
-    // Simple hash-based embedding
+  generateSimpleEmbedding(text, dim = 384) {
+    const emb = new Array(dim).fill(0);
     for (let i = 0; i < text.length; i++) {
       const char = text.charCodeAt(i);
-      const index = char % dimensions;
-      embedding[index] += Math.sin(char * 0.1) * Math.cos(i * 0.1);
+      emb[char % dim] += Math.sin(char * 0.1) * Math.cos(i * 0.1);
     }
-    
-    // Normalize the vector
-    const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
-    return embedding.map(val => magnitude > 0 ? val / magnitude : 0);
+    const mag = Math.sqrt(emb.reduce((s, v) => s + v * v, 0));
+    return emb.map(v => (mag ? v / mag : 0));
   }
 
-  // Calculate cosine similarity between two vectors incased vector ssearch is not used
-  cosineSimilarity(vecA, vecB) {
-    if (vecA.length !== vecB.length) {
-      throw new Error('Vectors must have the same dimension');
-    }
+  // ─── SIMILARITY ──────────────────────────────────────────────────────────
 
-    const dotProduct = vecA.reduce((sum, a, i) => sum + a * vecB[i], 0);
-    const magnitudeA = Math.sqrt(vecA.reduce((sum, a) => sum + a * a, 0));
-    const magnitudeB = Math.sqrt(vecB.reduce((sum, b) => sum + b * b, 0));
-
-    return magnitudeA && magnitudeB ? dotProduct / (magnitudeA * magnitudeB) : 0;
+  cosineSimilarity(a, b) {
+    if (a.length !== b.length) throw new Error('Dim mismatch');
+    const dot  = a.reduce((s, v, i) => s + v * b[i], 0);
+    const magA = Math.sqrt(a.reduce((s, v) => s + v * v, 0));
+    const magB = Math.sqrt(b.reduce((s, v) => s + v * v, 0));
+    return magA && magB ? dot / (magA * magB) : 0;
   }
 
-  // Store chat with embedding
-  async storeChatWithEmbedding(userId, message, response) {
-    try {
-      const messageEmbedding = await this.generateEmbedding(message);
-      const responseEmbedding = await this.generateEmbedding(response);
-      Í
-      return await mongoService.storeChatMessage(
-        userId, 
-        message, 
-        response, 
-        {
-          messageEmbedding,
-          responseEmbedding,
-          combinedEmbedding: this.combineEmbeddings(messageEmbedding, responseEmbedding)
-        }
-      );
-    } catch (error) {
-      console.error('Error storing chat with embedding:', error.message);
-      throw error;
-    }
+  combineEmbeddings(a, b, alpha = 0.5) {
+    return a.map((v, i) => alpha * v + (1 - alpha) * b[i]);
   }
 
-  // Store document with embedding for RAG
+  // ─── STORAGE ─────────────────────────────────────────────────────────────
+
   async storeDocumentWithEmbedding(title, content, metadata = {}) {
-    try {
-      const embedding = await this.generateEmbedding(content);
-      return await mongoService.storeDocument(title, content, embedding, {
-        ...metadata,
-        embeddingMethod: 'typhoon-api',
-        embeddingDimensions: embedding.length
-      });
-    } catch (error) {
-      console.error('Error storing document with embedding:', error.message);
-      throw error;
-    }
+    const cleaned   = this.preprocessContent(content);
+    const embedding = await this.generateEmbedding(cleaned);
+    return await mongoService.storeDocument(title, cleaned, embedding, {
+      ...metadata,
+      wasTableCleaned: content.toLowerCase().includes('<table')
+    });
   }
 
-  // Find similar content using embeddings with enhanced scoring
+  async storeChatWithEmbedding(userId, message, response) {
+    const m = await this.generateEmbedding(message);
+    const r = await this.generateEmbedding(response);
+    return await mongoService.storeChatMessage(userId, message, response, {
+      messageEmbedding:  m,
+      responseEmbedding: r,
+      combinedEmbedding: this.combineEmbeddings(m, r)
+    });
+  }
+
+  // ─── SEARCH ──────────────────────────────────────────────────────────────
+
   async findSimilarContent(query, limit = 5) {
+    const qEmb = await this.generateEmbedding(query);
     try {
-      console.log(`🔍 Searching for content similar to: "${query}"`);
-      const queryEmbedding = await this.generateEmbedding(query);
-      
-      // Try vector search first 
-      try {
-        const results = await mongoService.vectorSearch(queryEmbedding, limit);
-        console.log(`Vector search returned ${results.length} results`);
-        return results;
-      } catch (vectorError) {
-        console.warn('Vector search not available, using fallback method');
-        
-        // else: Manual similarity calculation
-        const results = await this.manualSimilaritySearch(queryEmbedding, limit);
-        console.log(`Manual search returned ${results.length} results`);
-        return results;
-      }
-    } catch (error) {
-      console.error('Error finding similar content:', error.message);
-      throw error;
+      return await mongoService.vectorSearch(qEmb, limit);
+    } catch {
+      return this.manualSimilaritySearch(qEmb, limit);
     }
   }
 
-  // Manual similarity search (when Atlas Search is not available)
-  async manualSimilaritySearch(queryEmbedding, limit = 5) {
-    try {
-      console.log('Performing manual similarity search...');
-      const db = await mongoService.connect();
-      const collection = db.collection('thai_insurance_docs');
-      
-      const documents = await collection.find({}).toArray();
-      console.log(`Found ${documents.length} documents in database`);
-      
-      if (documents.length === 0) {
-        console.log('No documents found in database');
-        return [];
-      }
-      
-      const similarities = documents
-        .filter(doc => doc.embedding && Array.isArray(doc.embedding))
-        .map(doc => {
-          const similarity = this.cosineSimilarity(queryEmbedding, doc.embedding);
-          return {
-            ...doc,
-            similarity: similarity,
-            score: similarity // Add score field for compatibility
-          };
-        })
-        .filter(doc => doc.similarity > 0); // Filter out zero similarities
-      
-      const sortedResults = similarities
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, limit);
-      
-      console.log(`Manual search completed, returning ${sortedResults.length} results`);
-      console.log(`Top similarity scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
-      
-      return sortedResults;
-    } catch (error) {
-      console.error('Error in manual similarity search:', error.message);
-      throw error;
-    }
+  async manualSimilaritySearch(qEmb, limit = 5) {
+    const db   = await mongoService.connect();
+    const docs = await db.collection('thai_insurance_docs').find({}).toArray();
+    return docs
+      .filter(d => d.embedding)
+      .map(d => ({ ...d, similarity: this.cosineSimilarity(qEmb, d.embedding) }))
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
   }
 
-  // Combine two embeddings (for chat context)
-  combineEmbeddings(embA, embB, alpha = 0.5) {
-    return embA.map((val, i) => alpha * val + (1 - alpha) * embB[i]);
-  }
-
-  // Get context for RAG-based responses
   async getRelevantContext(query, limit = 3) {
-    try {
-      const similarDocs = await this.findSimilarContent(query, limit);
-      
-      return {
-        context: similarDocs.map(doc => ({
-          title: doc.title,
-          content: doc.content.substring(0, 500), // Truncate for context
-          similarity: doc.similarity || doc.score
-        })),
-        query,
-        timestamp: new Date()
-      };
-    } catch (error) {
-      console.error('Error getting relevant context:', error.message);
-      return { context: [], query, timestamp: new Date() };
-    }
+    const docs = await this.findSimilarContent(query, limit);
+    return {
+      context: docs.map(d => ({ title: d.title, content: d.content.substring(0, 500), similarity: d.similarity })),
+      query, timestamp: new Date()
+    };
   }
 
-  // Find similar content in USER documents
+  // ─── USER DOCUMENT SEARCH (required by ragService) ───────────────────────
+
   async findSimilarUserContent(query, userId, limit = 5) {
     try {
       console.log(`Searching user documents for userId: ${userId}`);
-      
-      const db = await mongoService.connect();
+      const db         = await mongoService.connect();
       const collection = db.collection('user_documents');
-      
-      const userDocuments = await collection.find({ userId }).toArray();
-      console.log(`Found ${userDocuments.length} user documents`);
-      
-      if (userDocuments.length === 0) {
-        return [];
-      }
-      
-      // If the query references a specific uploaded filename (e.g., AIA01.png, IMG_8790.JPG),
-      // force-include exact matches first. This makes table lookups deterministic.
+      const userDocs   = await collection.find({ userId }).toArray();
+      console.log(`Found ${userDocs.length} user documents`);
+      if (userDocs.length === 0) return [];
+
+      // Force-include docs matching filename tokens in query
       const filenameTokens = Array.from(
         new Set((query.match(/\b(?:AIA\d{1,3}|IMG_\d{3,6})(?:\.(?:png|jpg|jpeg))?\b/gi) || [])
           .map(t => t.toLowerCase()))
       );
-      if (filenameTokens.length > 0) {
-        const exactFileMatches = userDocuments.filter(doc => {
-          const title = (doc.title || '').toString().toLowerCase();
-          const originalName = (doc.metadata?.originalName || '').toString().toLowerCase();
-          return filenameTokens.some(tok => {
-            const withExt = tok.includes('.') ? tok : `${tok}.png`;
-            return title.includes(tok) || originalName.includes(tok) || title.includes(withExt) || originalName.includes(withExt);
-          });
-        });
-        
-        if (exactFileMatches.length > 0) {
-          console.log(`Found ${exactFileMatches.length} exact filename match(es): ${filenameTokens.join(', ')}`);
-          const forced = exactFileMatches.map(doc => ({
-            ...doc,
-            similarity: 1.0,
-            score: 1.0,
-            source: 'user_upload'
-          }));
-          
-          // If we already have enough forced matches, return them
-          if (forced.length >= limit) return forced.slice(0, limit);
-          
-          // Otherwise, continue and fill remaining slots with similarity search results
-        }
-      }
-
-      // Check if query contains a policy number
-      const policyNumberMatch = query.match(/(\d{7,10})/);
-      if (policyNumberMatch) {
-        const policyNumber = policyNumberMatch[1];
-        console.log(`Detected policy number in query: ${policyNumber}`);
-        
-        // Try exact match first
-        const exactMatches = userDocuments.filter(doc => 
-          doc.content && doc.content.includes(policyNumber)
-        );
-        
-        if (exactMatches.length > 0) {
-          console.log(`Found ${exactMatches.length} exact matches for policy ${policyNumber}`);
-          return exactMatches.map(doc => ({
-            ...doc,
-            similarity: 1.0, // Perfect match
-            score: 1.0,
-            source: 'user_upload'
-          })).slice(0, limit);
-        }
-      }
-      
-      // Fall back to embedding similarity search
-      const queryEmbedding = await this.generateEmbedding(query);
-      
-      const similarities = userDocuments
-        .filter(doc => doc.embedding && Array.isArray(doc.embedding))
-        .map(doc => {
-          const similarity = this.cosineSimilarity(queryEmbedding, doc.embedding);
-          return {
-            ...doc,
-            similarity: similarity,
-            score: similarity,
-            source: 'user_upload'
-          };
-        })
-        .filter(doc => doc.similarity > 0);
-      
-      const sortedResults = similarities
-        .sort((a, b) => b.similarity - a.similarity)
-        .slice(0, limit);
-
-      // forced merge filename that  matches (if present) with similarity results, de-duping by _id
       const forcedIds = new Set();
-      const forcedFromQuery = (filenameTokens.length > 0)
-        ? userDocuments
-          .filter(doc => {
-            const title = (doc.title || '').toString().toLowerCase();
-            const originalName = (doc.metadata?.originalName || '').toString().toLowerCase();
+      const forcedDocs = filenameTokens.length > 0
+        ? userDocs.filter(doc => {
+            const title = (doc.title || '').toLowerCase();
+            const orig  = (doc.metadata?.originalName || '').toLowerCase();
             return filenameTokens.some(tok => {
-              const withExt = tok.includes('.') ? tok : `${tok}.png`;
-              return title.includes(tok) || originalName.includes(tok) || title.includes(withExt) || originalName.includes(withExt);
+              const ext = tok.includes('.') ? tok : tok + '.png';
+              return title.includes(tok) || orig.includes(tok) || title.includes(ext) || orig.includes(ext);
             });
-          })
-          .map(doc => {
+          }).map(doc => {
             forcedIds.add(doc._id?.toString?.() ?? doc._id);
             return { ...doc, similarity: 1.0, score: 1.0, source: 'user_upload' };
           })
         : [];
-      
-      const merged = [...forcedFromQuery, ...sortedResults.filter(doc => !forcedIds.has(doc._id?.toString?.() ?? doc._id))].slice(0, limit);
-      
-      console.log(`User search completed, returning ${sortedResults.length} results`);
-      if (sortedResults.length > 0) {
-        console.log(`Top user doc scores: ${sortedResults.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
+
+      if (forcedDocs.length >= limit) return forcedDocs.slice(0, limit);
+
+      // Exact policy number match
+      const policyMatch = query.match(/(\d{7,10})/);
+      if (policyMatch) {
+        const exact = userDocs.filter(d => d.content?.includes(policyMatch[1]));
+        if (exact.length > 0)
+          return exact.map(d => ({ ...d, similarity: 1.0, score: 1.0, source: 'user_upload' })).slice(0, limit);
       }
-      
+
+      // Embedding similarity
+      const qEmb = await this.generateEmbedding(query);
+      const scored = userDocs
+        .filter(d => d.embedding && Array.isArray(d.embedding))
+        .map(d => ({ ...d, similarity: this.cosineSimilarity(qEmb, d.embedding), score: this.cosineSimilarity(qEmb, d.embedding), source: 'user_upload' }))
+        .filter(d => d.similarity > 0)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+
+      const merged = [
+        ...forcedDocs,
+        ...scored.filter(d => !forcedIds.has(d._id?.toString?.() ?? d._id))
+      ].slice(0, limit);
+
+      console.log(`User search: ${merged.length} results`);
       return merged;
     } catch (error) {
-      console.error(' Error finding similar user content:', error.message);
+      console.error('Error finding similar user content:', error.message);
       return [];
     }
   }
 
-  /**
-   * Search for similar chat history using semantic similarity
-   * Useful for finding relevant past conversations
-   */
+  // ─── CHAT HISTORY SEARCH (required by ragService) ────────────────────────
+
   async findSimilarChatHistory(query, userId, limit = 5) {
     try {
-      console.log(`Searching chat history for: "${query}"`);
-      const queryEmbedding = await this.generateEmbedding(query);
-      
-      const db = await mongoService.connect();
+      const qEmb       = await this.generateEmbedding(query);
+      const db         = await mongoService.connect();
       const collection = db.collection('chat_history');
-      
-      // Get all chat history for this user that has embeddings
-      const chatHistory = await collection.find({ 
+      const history    = await collection.find({
         userId,
         $or: [
-          { messageEmbedding: { $exists: true, $ne: null } },
+          { messageEmbedding:  { $exists: true, $ne: null } },
           { responseEmbedding: { $exists: true, $ne: null } }
         ]
       }).toArray();
-      
-      console.log(`Found ${chatHistory.length} chat messages with embeddings`);
-      
-      if (chatHistory.length === 0) {
-        return [];
-      }
-      
-      const similarities = chatHistory.map(chat => {
-        let maxSimilarity = 0;
-        let matchedContent = '';
-        let matchedType = '';
-        
-        // Check similarity with user message
-        if (chat.messageEmbedding && Array.isArray(chat.messageEmbedding)) {
-          const msgSimilarity = this.cosineSimilarity(queryEmbedding, chat.messageEmbedding);
-          if (msgSimilarity > maxSimilarity) {
-            maxSimilarity = msgSimilarity;
-            matchedContent = chat.userMessage;
-            matchedType = 'user_message';
-          }
-        }
-        
-        // Check similarity with bot response
-        if (chat.responseEmbedding && Array.isArray(chat.responseEmbedding)) {
-          const resSimilarity = this.cosineSimilarity(queryEmbedding, chat.responseEmbedding);
-          if (resSimilarity > maxSimilarity) {
-            maxSimilarity = resSimilarity;
-            matchedContent = chat.botResponse;
-            matchedType = 'bot_response';
-          }
-        }
-        
-        return {
-          userMessage: chat.userMessage,
-          botResponse: chat.botResponse,
-          timestamp: chat.timestamp,
-          similarity: maxSimilarity,
-          matchedContent,
-          matchedType
-        };
-      })
-      .filter(chat => chat.similarity > 0.3) // Minimum threshold
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, limit);
-      
-      console.log(`Chat history search completed, returning ${similarities.length} results`);
-      if (similarities.length > 0) {
-        console.log(`Top chat scores: ${similarities.slice(0, 3).map(r => (r.similarity * 100).toFixed(1) + '%').join(', ')}`);
-      }
-      
-      return similarities;
+
+      if (!history.length) return [];
+
+      return history
+        .map(chat => {
+          let max = 0;
+          if (chat.messageEmbedding?.length)  max = Math.max(max, this.cosineSimilarity(qEmb, chat.messageEmbedding));
+          if (chat.responseEmbedding?.length) max = Math.max(max, this.cosineSimilarity(qEmb, chat.responseEmbedding));
+          return { userMessage: chat.userMessage, botResponse: chat.botResponse, timestamp: chat.timestamp, similarity: max };
+        })
+        .filter(c => c.similarity > 0.3)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
     } catch (error) {
       console.error('Error searching chat history:', error.message);
       return [];

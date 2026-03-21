@@ -2,8 +2,11 @@ import mongoService from './mongoService.js';
 
 class EmbeddingService {
   constructor() {
-    this.apiKey = process.env.VITE_API_KEY;
+    this.apiKey  = process.env.VITE_API_KEY;
     this.baseUrl = process.env.VITE_API_BASE_URL;
+    // Cache embeddings — avoids re-embedding same text on every query
+    this._embCache    = new Map();
+    this._embCacheTTL = 60 * 60 * 1000; // 1 hour
   }
 
   // ─── TABLE CLEANING ───────────────────────────────────────────────────────
@@ -31,7 +34,7 @@ class EmbeddingService {
         for (const c of row) {
           if (/^\d{2,5}(,\d{3})?$/.test(c)) {
             const n = parseInt(c.replace(/,/g, ''), 10);
-            if (c === ageCell || n <= 600) continue;
+            if (c === ageCell || n < 100) continue; // Keep 500-baht premiums (some policies have low premiums)
             nums.push(n);
           }
         }
@@ -69,6 +72,11 @@ class EmbeddingService {
   async generateEmbedding(text) {
     const cleanText = this.preprocessContent(text);
 
+    // Return cached embedding if available (avoids 429 on repeated queries)
+    const cKey = cleanText.substring(0, 200); // key = first 200 chars
+    const cached = this._embCache.get(cKey);
+    if (cached && Date.now() - cached.ts < this._embCacheTTL) return cached.vec;
+
     try {
       const response = await fetch(`${this.baseUrl}/embeddings`, {
         method: 'POST',
@@ -85,7 +93,10 @@ class EmbeddingService {
       }
 
       const data = await response.json();
-      return data.data[0].embedding;
+      const vec  = data.data[0].embedding;
+      this._embCache.set(cKey, { vec, ts: Date.now() });
+      if (this._embCache.size > 500) this._embCache.delete(this._embCache.keys().next().value);
+      return vec;
     } catch (err) {
       console.log('Embedding error → fallback', err.message);
       return this.generateSimpleEmbedding(cleanText);
@@ -128,8 +139,10 @@ class EmbeddingService {
   }
 
   async storeChatWithEmbedding(userId, message, response) {
-    const m = await this.generateEmbedding(message);
-    const r = await this.generateEmbedding(response);
+    // Use hash embedding (no API call) for chat history storage
+    // This avoids 2 API calls per message while still allowing similarity search
+    const m = this.generateSimpleEmbedding(message);
+    const r = this.generateSimpleEmbedding(response);
     return await mongoService.storeChatMessage(userId, message, response, {
       messageEmbedding:  m,
       responseEmbedding: r,
@@ -177,37 +190,75 @@ class EmbeddingService {
       console.log(`Found ${userDocs.length} user documents`);
       if (userDocs.length === 0) return [];
 
-      // Force-include docs matching filename tokens in query
-      const filenameTokens = Array.from(
-        new Set((query.match(/\b(?:AIA\d{1,3}|IMG_\d{3,6})(?:\.(?:png|jpg|jpeg))?\b/gi) || [])
-          .map(t => t.toLowerCase()))
-      );
-      const forcedIds = new Set();
-      const forcedDocs = filenameTokens.length > 0
-        ? userDocs.filter(doc => {
-            const title = (doc.title || '').toLowerCase();
-            const orig  = (doc.metadata?.originalName || '').toLowerCase();
-            return filenameTokens.some(tok => {
-              const ext = tok.includes('.') ? tok : tok + '.png';
-              return title.includes(tok) || orig.includes(tok) || title.includes(ext) || orig.includes(ext);
-            });
-          }).map(doc => {
-            forcedIds.add(doc._id?.toString?.() ?? doc._id);
-            return { ...doc, similarity: 1.0, score: 1.0, source: 'user_upload' };
-          })
-        : [];
-
-      if (forcedDocs.length >= limit) return forcedDocs.slice(0, limit);
-
-      // Exact policy number match
-      const policyMatch = query.match(/(\d{7,10})/);
-      if (policyMatch) {
-        const exact = userDocs.filter(d => d.content?.includes(policyMatch[1]));
-        if (exact.length > 0)
-          return exact.map(d => ({ ...d, similarity: 1.0, score: 1.0, source: 'user_upload' })).slice(0, limit);
+      // ── 0. Keyword search for premium amount queries ─────────────────────
+      // Bypasses embedding when API fails — scan raw content for เบี้ย + amount
+      const _isPremAmt = /\u0e0a\u0e33\u0e23\u0e30\u0e40\u0e1a\u0e35\u0e49\u0e22|\u0e40\u0e1a\u0e35\u0e49\u0e22\u0e01\u0e23\u0e21\u0e18\u0e23\u0e23\u0e21|\u0e40\u0e1a\u0e35\u0e49\u0e22\u0e1b\u0e23\u0e30\u0e01\u0e31\u0e19/.test(query);
+      const _keywordForced = [];
+      const _keywordIds    = new Set();
+      if (_isPremAmt) {
+        const _amtRe = /\d{3,6}\s*\u0e1a\u0e32\u0e17/;
+        userDocs.filter(d => _amtRe.test(d.content || '')).forEach(d => {
+          const id = d._id?.toString?.() ?? d._id;
+          _keywordIds.add(id);
+          _keywordForced.push({ ...d, similarity: 0.95, score: 0.95, source: 'user_upload' });
+          console.log('Keyword premium match: ' + d.title);
+        });
       }
 
-      // Embedding similarity
+      const forcedIds = new Set();
+      const forced = [];
+
+      // ── 1. Policy number match (highest priority) ──────────────────────────
+      // User can specify their policy number in the query — match against policyName metadata
+      // Supports 5-12 digit numbers (Thai insurance policy numbers vary)
+      const policyNumMatch = query.match(/\b(\d{5,12})\b/);
+      if (policyNumMatch) {
+        const pNum = policyNumMatch[1];
+        const byPolicy = userDocs.filter(d =>
+          (d.metadata?.policyName || '').toString().includes(pNum) ||
+          (d.content || '').includes(pNum)
+        );
+        byPolicy.forEach(d => {
+          const id = d._id?.toString?.() ?? d._id;
+          if (!forcedIds.has(id)) { forcedIds.add(id); forced.push({ ...d, similarity: 1.0, score: 1.0, source: 'user_upload' }); }
+        });
+        if (forced.length > 0) console.log('Policy number match (' + pNum + '): ' + forced.length + ' docs');
+      }
+
+      // ── 2. Filename token match ────────────────────────────────────────────
+      // Match any filename-like token in the query (IMG_xxxx, AIA01, DSC_xxxx, etc.)
+      // Also match partial numbers like "8785" against "IMG_8785.JPG"
+      const fileTokens = Array.from(new Set(
+        (query.match(/\b(?:[A-Z]{1,5}_?\d{3,6}|[A-Z]{2,5}\d{1,3})(?:\.(?:png|jpg|jpeg|pdf))?\b/gi) || [])
+          .map(t => t.toLowerCase())
+      ));
+      // Also extract bare numbers that could be part of a filename (e.g. "8785" → IMG_8785)
+      const bareNums = (query.match(/\b(\d{4,6})\b/g) || []);
+
+      if (fileTokens.length > 0 || bareNums.length > 0) {
+        userDocs.forEach(doc => {
+          const id    = doc._id?.toString?.() ?? doc._id;
+          if (forcedIds.has(id)) return;
+          const title = (doc.title || '').toLowerCase();
+          const orig  = (doc.metadata?.originalName || '').toLowerCase();
+          const combined = title + ' ' + orig;
+
+          const matchesToken = fileTokens.some(tok => {
+            const withExt = tok.includes('.') ? tok : tok;
+            return combined.includes(tok) || combined.includes(withExt);
+          });
+          const matchesBare = bareNums.some(n => combined.includes(n));
+
+          if (matchesToken || matchesBare) {
+            forcedIds.add(id);
+            forced.push({ ...doc, similarity: 1.0, score: 1.0, source: 'user_upload' });
+          }
+        });
+      }
+
+      if (forced.length >= limit) return forced.slice(0, limit);
+
+      // Embedding similarity — cached so repeated queries don't cost API calls
       const qEmb = await this.generateEmbedding(query);
       const scored = userDocs
         .filter(d => d.embedding && Array.isArray(d.embedding))
@@ -217,8 +268,9 @@ class EmbeddingService {
         .slice(0, limit);
 
       const merged = [
-        ...forcedDocs,
-        ...scored.filter(d => !forcedIds.has(d._id?.toString?.() ?? d._id))
+        ..._keywordForced,
+        ...forced.filter(d => !_keywordIds.has(d._id?.toString?.() ?? d._id)),
+        ...scored.filter(d => !forcedIds.has(d._id?.toString?.() ?? d._id) && !_keywordIds.has(d._id?.toString?.() ?? d._id))
       ].slice(0, limit);
 
       console.log(`User search: ${merged.length} results`);
@@ -233,7 +285,8 @@ class EmbeddingService {
 
   async findSimilarChatHistory(query, userId, limit = 5) {
     try {
-      const qEmb       = await this.generateEmbedding(query);
+      // Use hash embedding — consistent with how chat history is stored
+      const qEmb       = this.generateSimpleEmbedding(query);
       const db         = await mongoService.connect();
       const collection = db.collection('chat_history');
       const history    = await collection.find({

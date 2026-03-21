@@ -4,8 +4,29 @@ import { APIService } from './apiService.js';
 class RAGService {
   constructor() {
     this.similarityThreshold = 0.2;
-    this.defaultContextLimit = 5;
-    this.maxChunkLength = 2500;
+    this.defaultContextLimit = 8; // Increased for users with many uploaded files
+    this.maxChunkLength = 2500; // Full rate table needs ~2000 chars
+    // Response cache — avoids hitting API for repeated questions
+    this._cache    = new Map();
+    this._cacheTTL = 30 * 60 * 1000; // 30 min
+  }
+
+  _cacheKey(userId, query) {
+    const q = query.toLowerCase().replace(/\s+/g, ' ').replace(/[?!.,]/g, '').trim();
+    return (userId || 'anon') + '::' + q;
+  }
+
+  _fromCache(key) {
+    const e = this._cache.get(key);
+    if (!e) return null;
+    if (Date.now() - e.ts > this._cacheTTL) { this._cache.delete(key); return null; }
+    console.log('Cache hit:', key.substring(0, 60));
+    return e.val;
+  }
+
+  _toCache(key, val) {
+    if (this._cache.size >= 200) this._cache.delete(this._cache.keys().next().value);
+    this._cache.set(key, { val, ts: Date.now() });
   }
 
   cleanResponseFormatting(text) {
@@ -33,6 +54,12 @@ class RAGService {
 
   async queryWithRAG(userQuery, options = {}) {
     const { contextLimit = this.defaultContextLimit, userId = null, recentMessages = [] } = options;
+
+    // Cache check — OUTSIDE try so cacheKey is accessible in catch too
+    const cacheKey = this._cacheKey(userId, userQuery);
+    const cached   = this._fromCache(cacheKey);
+    if (cached) return cached;
+
     try {
       console.log('Starting RAG workflow for query:', userQuery);
       let similarPastChats = [];
@@ -57,10 +84,16 @@ class RAGService {
       contextData.similarChats = similarPastChats;
 
       const response          = await this.generateRAGResponse(userQuery, contextData, recentMessages);
-      const cleanedResponse   = this.cleanResponseFormatting(response.message);
+      // Safely extract message text — handle multiple possible response shapes
+      const rawMessage = response?.message          // { message: '...' }
+                      || response?.content          // { content: '...' }
+                      || response?.choices?.[0]?.message?.content  // OpenAI shape
+                      || (typeof response === 'string' ? response : null)
+                      || 'ขออภัยครับ ไม่สามารถสร้างคำตอบได้ กรุณาลองใหม่อีกครั้ง';
+      const cleanedResponse   = this.cleanResponseFormatting(rawMessage);
       const normalizedResponse = this.normalizePolicySourceLine(cleanedResponse, contextData.context);
 
-      return {
+      const result = {
         success: true, query: userQuery, response: normalizedResponse, context: contextData.context,
         metadata: {
           contextFound: contextData.context.length > 0,
@@ -71,6 +104,8 @@ class RAGService {
           timestamp: new Date()
         }
       };
+      this._toCache(cacheKey, result);
+      return result;
     } catch (error) {
       console.error('Error in RAG workflow:', error.message);
       return {
@@ -83,16 +118,18 @@ class RAGService {
   }
 
   isAmountOrPremiumQuery(query) {
+    // Only trigger strict mode for actual money/premium queries
+    // ❌ Do NOT include เสียชีวิต/ผลประโยชน์ — those are coverage questions, not amount-only
     const keywords = [
       'วงเงิน','จำนวนเงิน','ทุนประกัน','เบี้ยประกัน','ค่าใช้จ่าย','เบี้ย',
       'จ่ายสูงสุด','จ่ายเท่าไหร่','ราคา','ต้องจ่าย','จ่ายเท่าไร',
-      'เสียชีวิต','ค่าชดเชย','ผลประโยชน์','สินไหม','เงินเอาประกันภัย'
+      'ค่าชดเชย','สินไหม','เงินเอาประกันภัย'
     ];
     return keywords.some(k => query.toLowerCase().includes(k.toLowerCase()));
   }
 
   isPremiumRateQuery(query) {
-    return /เบี้ย(?:รายเดือน|รายปี)?|จ่ายเดือน|ต้องจ่ายเดือน/.test(query);
+    return /เบี้ย(?:รายเดือน|รายปี|กรมธรรม์)?|จ่ายเดือน|ต้องจ่ายเดือน|อัตราเบี้ย|ชำระเบี้ย|ชำระเบี้ยประกัน/.test(query);
   }
 
   isCoverageOrAmountQuery(query) {
@@ -121,7 +158,7 @@ class RAGService {
       r += ' ผลประโยชน์ ความคุ้มครอง เงื่อนไข';
 
     // Pattern 4: premium rate table
-    if (/เบี้ย|จ่ายเดือน|ต้องจ่าย/.test(query)) {
+    if (/เบี้ย|จ่ายเดือน|ต้องจ่าย|ชำระเบี้ย/.test(query)) {
       r += ' เบี้ยประกันภัยรายเดือน ตารางเบี้ย อัตราเบี้ย รายเดือน';
       const ageMatch = query.match(/อายุ\s*(\d+)|\b(\d{2})\s*ปี/);
       if (ageMatch) r += ' อายุ ' + (ageMatch[1] || ageMatch[2]);
@@ -147,7 +184,7 @@ class RAGService {
     // Pattern 9: generic premium query with no age/sex
     // e.g. "เบี้ยรายเดือนต้องจ่ายเท่าไหร่"
     if (/เบี้ย/.test(query) && !/อายุ|ชาย|หญิง/.test(query) && !/ตารางเบี้ย/.test(r))
-      r += ' เบี้ยประกันภัยรายเดือน ตารางเบี้ย อัตราเบี้ย';
+      r += ' เบี้ยประกันภัยรายเดือน เบี้ยรายปี ตารางเบี้ย อัตราเบี้ย อายุ โครงการ';
 
     // Pattern 10: generic conditions/benefits query
     // e.g. "เงื่อนไขกรมธรรม์และผลประโยชน์"
@@ -168,16 +205,19 @@ class RAGService {
 
       if (userId) {
         try {
-          const _isPrem  = /เบี้ย|จ่ายเดือน|ต้องจ่ายเดือน/.test(query);
+          const _isPrem  = /เบี้ย(?:รายเดือน|รายปี|กรมธรรม์)?|จ่ายเดือน|ต้องจ่ายเดือน|อัตราเบี้ย|ชำระเบี้ย|ชำระเบี้ยประกัน/.test(query);
           const _hasAge  = /อายุ\s*\d+|\b\d{2}\s*ปี/.test(query);
           const _hasSex  = /ชาย|หญิง/.test(query);
 
-          // Bypass similarity when: premium query + age (sex optional — model will ask if missing)
-          if (_isPrem && (_hasAge || _hasSex)) {
+          // Bypass similarity when: premium query + (age OR sex OR it's a general premium question)
+          // General premium questions like "ต้องชำระเบี้ยกี่บาท" also need bypass — answer is in policy doc
+          const _isGeneralPrem = _isPrem && !_hasAge && !_hasSex;
+          if (_isPrem && (_hasAge || _hasSex || _isGeneralPrem)) {
+            // Fetch ALL user docs — re-ranking happens below to find the right one
             const all    = await embeddingService.findSimilarUserContent(query, userId, 20);
-            userDocs     = all.slice(0, limit);
+            userDocs     = all; // keep all for now, capped after re-rank
             userContextCount = userDocs.length;
-            console.log('Premium bypass: ' + userContextCount + ' docs');
+            console.log('Premium bypass: ' + userContextCount + ' docs (will re-rank)');
           } else {
             const searchLimit = isCoverageQuery ? Math.ceil(limit * 2) : limit;
             const similar     = await embeddingService.findSimilarUserContent(query, userId, searchLimit);
@@ -187,7 +227,7 @@ class RAGService {
             // FALLBACK: if similarity search returns 0 docs, return ALL user docs
             // User uploaded them specifically to be used — never leave them out
             if (userDocs.length === 0 && similar.length > 0) {
-              userDocs = similar.slice(0, limit);
+              userDocs = similar.slice(0, Math.min(limit, 3)); // Cap fallback docs
               console.log('Similarity fallback: returning all ' + userDocs.length + ' user docs (threshold bypassed)');
             }
             userContextCount = userDocs.length;
@@ -196,6 +236,29 @@ class RAGService {
         } catch (e) {
           console.log('No user documents found: ' + e.message);
         }
+      }
+
+      // Cap docs sent to model to prevent token overflow
+      // Each doc can be up to 800 chars — keep total context manageable
+      const _isPremQuery = /เบี้ย|ชำระเบี้ย/.test(query);
+      const maxDocs = _isPremQuery ? 3 : 5;
+      userDocs = userDocs.slice(0, maxDocs);
+      // Re-rank docs for premium queries: prefer docs with actual baht amounts
+      // Policy terms pages mention เบี้ย many times but don't have the actual amount
+      // Receipt/schedule pages have "เบี้ยประกันภัยรวม 500 บาท" etc.
+      const _isPremAmtQuery = /ชำระเบี้ย|เบี้ยกรมธรรม์|เบี้ยประกัน(?:ภัย)?(?:รวม|งวด|เดือน|ปี)?/.test(query);
+      if (_isPremAmtQuery && userDocs.length > 1) {
+        // Boost docs that contain actual premium amounts (pattern: number + บาท near เบี้ย)
+        userDocs.sort((a, b) => {
+          // Match เบี้ย near an amount — allow newlines between them (OCR splits lines)
+          const amtRegex = /เบี้য[\s\S]{0,50}\d{3,6}\s*บาท|\d{3,6}\s*บาท[\s\S]{0,50}เบี้ย|เบี้ยประกัน[\s\S]{0,20}\d{3,6}/;
+          const hasAmtA = amtRegex.test(a.content || '');
+          const hasAmtB = amtRegex.test(b.content || '');
+          if (hasAmtA && !hasAmtB) return -1;
+          if (!hasAmtA && hasAmtB) return 1;
+          return (b.similarity || 0) - (a.similarity || 0);
+        });
+        console.log('Premium amount re-rank: top doc = ' + userDocs[0]?.title);
       }
 
       const allDocs = [...userDocs, ...systemDocs];
@@ -246,16 +309,29 @@ class RAGService {
   }
 
   async generateRAGResponse(query, contextData, recentMessages = []) {
-    try {
-      const systemMessage = this.buildSystemMessage(contextData, recentMessages);
-      console.log('Generating response with context...');
-      return await APIService.sendMessage([
-        { role: 'system', content: systemMessage },
-        { role: 'user',   content: query }
-      ]);
-    } catch (error) {
-      console.error('Error generating RAG response:', error.message);
-      throw error;
+    const systemMessage = this.buildSystemMessage(contextData, recentMessages);
+    const messages = [
+      { role: 'system', content: systemMessage },
+      { role: 'user',   content: query }
+    ];
+
+    // Retry with exponential backoff on 429 rate limit
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log('Generating response (attempt ' + attempt + ')...');
+        return await APIService.sendMessage(messages);
+      } catch (error) {
+        const is429 = error.message?.includes('429') || error.status === 429;
+        if (is429 && attempt < maxRetries) {
+          const wait = attempt * 2000; // 2s, 4s, 6s
+          console.log('Rate limit hit — retrying in ' + (wait/1000) + 's...');
+          await new Promise(r => setTimeout(r, wait));
+        } else {
+          console.error('Error generating RAG response:', error.message);
+          throw error;
+        }
+      }
     }
   }
 
@@ -269,7 +345,7 @@ class RAGService {
       msg += '\n\n💬 บทสนทนาที่ผ่านมา:';
       recentMessages.forEach((m, i) => {
         if (m.userMessage && m.botResponse) {
-          const short = m.botResponse.length > 500 ? m.botResponse.substring(0, 500) + '...' : m.botResponse;
+          const short = m.botResponse.length > 200 ? m.botResponse.substring(0, 200) + '...' : m.botResponse;
           msg += '\n\n' + (i+1) + '. ผู้ใช้: ' + m.userMessage + '\n   ระบบ: ' + short;
         }
       });
@@ -291,13 +367,11 @@ class RAGService {
 - ระบุชื่อกรมธรรม์เสมอ
 - อย่าใช้หัวข้อ ### หรือจัดรูปแบบซับซ้อน`;
 
-    // User-scoped anti-hallucination
+    // User-scoped: use docs first, but don't block reasonable answers
     if (isUserScoped) {
       msg += `
 
-🚨 กฎสำคัญ: ใช้เฉพาะข้อมูลจากเอกสารที่ผู้ใช้อัปโหลด (👤) ด้านล่างเท่านั้น
-- ❌ ห้ามใช้ความรู้จาก training data หรือชื่อกรมธรรม์ที่ไม่มีในเอกสาร
-- ✅ ถ้าไม่พบข้อมูลในเอกสาร → ตอบว่า "ไม่พบข้อมูลนี้ในเอกสารที่อัปโหลด" เท่านั้น ห้ามเดา`;
+🚨 ใช้ข้อมูลจากเอกสาร (👤) ด้านล่างก่อนเสมอ — ตอบจากเอกสาร ระบุชื่อไฟล์ — ห้ามแต่งชื่อหรือตัวเลขที่ไม่มีในเอกสาร`;
     }
 
     // Amount/premium extra rules
@@ -313,7 +387,8 @@ class RAGService {
 - ✅ ใช้เฉพาะตัวเลขและชื่อใน context เท่านั้น
 - ❌ ห้ามตั้งชื่อกรมธรรม์เอง ห้ามใส่ตัวเลขที่ไม่มีใน context
 - ❌ ห้ามสรุปว่า "เบี้ยรวม (เบี้ย×ปี)" = "ทุนประกัน/ผลประโยชน์กรณีเสียชีวิต"
-- ✅ ถ้าไม่มีข้อมูลในเอกสาร → ตอบตรงๆ ว่า "ไม่พบข้อมูล [สิ่งที่ถาม] ในเอกสารที่อัปโหลด"
+- ✅ ถ้าไม่มีข้อมูลในเอกสาร → บอกว่าไม่พบ แต่ถ้าพบข้อมูลใกล้เคียง ให้ตอบสิ่งที่พบพร้อมบอกว่าข้อมูลมาจากไหน
+- ✅ ถ้าเอกสารมีตัวเลขที่เกี่ยวข้อง (เช่น เบี้ยประกันภัยรวม 500 บาท) → ตอบตัวเลขนั้นพร้อมระบุแหล่งที่มา
 - ✅ คำนวณได้เฉพาะเมื่อตัวเลขทุกตัวมีใน context พร้อมแสดงสูตรสั้นๆ
 
 📌 คำถาม "เสียชีวิตได้กี่บาท":
@@ -321,14 +396,11 @@ class RAGService {
 - ✅ แจกแจงทุกกรณีจากตาราง: เสียชีวิตปกติ / อุบัติเหตุ (ทุนประกัน+ADD) / สาธารณภัย / HB รายวัน ฯลฯ
 - ✅ ตอบเฉพาะสิ่งที่มีใน context ห้ามสมมติ
 
-📌 วิธีอ่านตารางเบี้ยรายเดือน:
-ตารางรูปแบบ: อายุ | ป1ชาย | ป1หญิง | ป2ชาย | ป2หญิง | ป3ชาย | ป3หญิง
-(ป1=โครงการ1 ทุน100,000, ป2=โครงการ2 ทุน150,000, ป3=โครงการ3 ทุน200,000)
-ตัวอย่าง: 20 | 849 | 833 | 1225 | 1201 | 1601 | 1569 → ป1ชาย=849 ป1หญิง=833 ป2ชาย=1225 ป2หญิง=1201 ป3ชาย=1601 ป3หญิง=1569
-ตัวอย่าง: 40 | 885 | 855 | 1279 | 1234 | 1673 | 1613 → ป1ชาย=885 ป1หญิง=855 ป2ชาย=1279 ป2หญิง=1234 ป3ชาย=1673 ป3หญิง=1613
-🎯 ขั้นตอน: (1) หาแถวที่ขึ้นต้นด้วยอายุที่ถาม (2) นับค่าที่ 1-6 ตามลำดับ (3) ตอบค่าที่ตรงกับโครงการ+เพศ
-❌ ห้ามอ่านผิดแถว ❌ ห้ามสับคอลัมน์ — ค่าที่ 3 = ป2ชาย ไม่ใช่ ป1หญิง
-- ถ้าต้องการทราบเบี้ย: ต้องรู้ อายุ/เพศ ถ้าไม่มีให้ถามผู้ใช้ก่อน`;
+📌 อ่านตารางเบี้ย: อายุ | ป1ชาย | ป1หญิง | ป2ชาย | ป2หญิง | ป3ชาย | ป3หญิง
+เช่น แถว "40 |" → 40 | 885 | 855 | 1279 | 1234 | 1673 | 1613 → ป1ชาย=885, ป2ชาย=1279, ป3ชาย=1673
+❌ ห้ามอ่านผิดแถวหรือสับคอลัมน์ — ป1ชาย≠ป2ชาย
+- ไม่บอกเพศ → แสดงทั้งชายและหญิงจากแถวอายุนั้น
+- ไม่บอกทั้งอายุและเพศ → ถามกลับ`
     }
 
     // Context documents
@@ -339,16 +411,17 @@ class RAGService {
         const sourceLabel = doc.source === 'user' ? '👤 เอกสารผู้ใช้' : '🏛️ ข้อมูลระบบ';
         const policyLabel = doc.policyName ? ' (' + doc.policyName + ')' : '';
         msg += '\n\n' + (i+1) + '. ' + doc.sourceIcon + ' ' + doc.title + policyLabel + (doc.chunkInfo||'') + ' [' + sourceLabel + ']' +
-               '\n   📝 เนื้อหา: ' + doc.content + '\n   🎯 ความเกี่ยวข้อง: ' + pct + '%';
+               '\n   📝 เนื้อหา: ' + (doc.content.length > 800 ? doc.content.substring(0, 800) + '...' : doc.content) + '\n   🎯 ความเกี่ยวข้อง: ' + pct + '%';
       });
       msg += '\n\nกรุณาอ้างอิงข้อมูลข้างต้นในการตอบ และระบุชื่อเอกสาร/ไฟล์ที่มาของข้อมูล';
+      msg += '\n\n⚠️ สำคัญ: เอกสารข้างต้นคือข้อมูลจริงจากผู้ใช้ กรุณาอ่านและตอบจากเนื้อหาในเอกสาร ห้ามตอบว่า "ไม่พบ" ถ้ายังไม่ได้อ่านเนื้อหาในเอกสารทั้งหมดด้านบน';
     }
 
     // Similar past chats (skip for amount/premium)
     if (!isUserOnlyQuery && contextData.similarChats?.length > 0) {
       msg += '\n\n🔍 บทสนทนาที่คล้ายกันในอดีต:';
       contextData.similarChats.forEach((chat, i) => {
-        const short = chat.botResponse.length > 500 ? chat.botResponse.substring(0,500) + '...' : chat.botResponse;
+        const short = chat.botResponse.length > 200 ? chat.botResponse.substring(0,200) + '...' : chat.botResponse;
         msg += '\n\n' + (i+1) + '. คำถาม: ' + chat.userMessage + '\n   คำตอบ: ' + short + '\n   🎯 ความเกี่ยวข้อง: ' + (chat.similarity*100).toFixed(1) + '%';
       });
       msg += '\n\nℹ️ บทสนทนาข้างต้นอาจให้บริบทเพิ่มเติม แต่ให้ตอบตามคำถามปัจจุบันเป็นหลัก';
@@ -357,7 +430,7 @@ class RAGService {
     // No data
     if (!contextData.context?.length && !contextData.similarChats?.length) {
       if (isUserOnlyQuery || isUserScoped) {
-        msg += '\n\n[ไม่พบข้อมูลในเอกสารที่อัปโหลด]: ตอบว่าไม่พบข้อมูลที่ถามในเอกสาร ห้ามใช้ข้อมูลจาก training data ห้ามเดา';
+        msg += '\n\n[เอกสารที่ดึงมาไม่มีข้อมูลที่ตรงกัน]: กรุณาตอบว่าไม่พบข้อมูลนี้ในเอกสาร และแนะนำให้ผู้ใช้อัปโหลดเอกสารที่มีข้อมูลดังกล่าว';
       } else {
         msg += '\n\nไม่พบข้อมูลที่เกี่ยวข้องในฐานข้อมูล กรุณาตอบตามความรู้ทั่วไปเกี่ยวกับประกันภัย และแนะนำให้ติดต่อผู้เชี่ยวชาญ';
       }
@@ -372,7 +445,8 @@ class RAGService {
         { role: 'system', content: 'คุณเป็นผู้ช่วยด้านประกันภัยไทย กรุณาตอบคำถามด้วยความรู้ทั่วไป และแนะนำให้ปรึกษาผู้เชี่ยวชาญ' },
         { role: 'user',   content: query }
       ]);
-      return response.success ? response.message : 'ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง';
+      const fbMsg = response?.message || response?.content || response?.choices?.[0]?.message?.content || null;
+      return fbMsg || 'ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง';
     } catch (e) {
       return 'ขออภัยครับ เกิดข้อผิดพลาดในการประมวลผล กรุณาลองใหม่อีกครั้ง';
     }
