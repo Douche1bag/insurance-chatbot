@@ -60,6 +60,7 @@ export default function App() {
       localStorage.setItem('currentPage', key);
     }
   };
+  
 
   let page = null;
   switch (currentPage) {

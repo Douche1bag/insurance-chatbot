@@ -411,6 +411,137 @@ app.get('/api/documents/user/:userId', async (req, res) => {
   }
 });
 
+// Extract key insurance phrases using LLM for precise RAG chunking
+async function extractInsurancePhrases(ocrText) {
+  const apiKey = process.env.VITE_API_KEY;
+  const baseUrl = process.env.VITE_API_BASE_URL || 'https://api.opentyphoon.ai/v1';
+  const model = process.env.VITE_MODEL_NAME || 'typhoon-v2.5-30b-a3b-instruct';
+
+  if (!apiKey) {
+    console.warn('⚠️ VITE_API_KEY not found, skipping phrase extraction');
+    return [];
+  }
+
+  const truncatedText = ocrText.substring(0, 8000);
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'คุณเป็นผู้ดึงข้อมูลจากเอกสาร หน้าที่ของคุณคืออ่านข้อความ OCR และดึงคู่ข้อมูล (ชื่อ + ค่า) ที่ปรากฏในข้อความจริงเท่านั้น ห้ามสร้างหรือเดาค่าใดๆ เด็ดขาด'
+          },
+          {
+            role: 'user',
+            content: `อ่านข้อความกรมธรรม์ที่ผ่าน OCR ด้านล่างอย่างละเอียด แล้วดึงคู่ข้อมูลที่มีทั้ง "ชื่อข้อมูล" และ "ค่า" ปรากฏอยู่ในข้อความจริงๆ
+
+กฎสำคัญที่ต้องทำตามเคร่งครัด:
+1. ใช้เฉพาะตัวเลขและค่าที่ปรากฏใน text นี้จริงๆ เท่านั้น
+2. ห้ามเดา คำนวณ หรือสร้างค่าขึ้นมาเอง แม้จะดูสมเหตุสมผล
+3. ถ้าตัวเลขไม่มี label ชัดเจนในข้อความ ให้ข้ามไป
+4. ถ้าไม่แน่ใจว่า label ไหนจับคู่กับตัวเลขไหน ให้ข้ามไป
+
+ตัวอย่างรูปแบบที่ต้องการ (ค่าตัวเลขต้องมาจาก text จริงเท่านั้น):
+- "ค่าเบี้ยประกันภัย 500 บาท ต่อปี"
+- "ทุนประกันชีวิต 100,000 บาท"
+- "ระยะเวลาคุ้มครอง 1 ปี"
+
+ตอบเฉพาะ JSON array ของ string เท่านั้น ไม่มีข้อความอื่น ไม่ต้องใส่ markdown
+
+ข้อความ OCR:
+${truncatedText}`
+          }
+        ],
+        max_tokens: 1000,
+        temperature: 0
+      })
+    });
+
+    if (!response.ok) {
+      console.warn(`⚠️ Phrase extraction API error (${response.status}), skipping`);
+      return [];
+    }
+
+    const data = await response.json();
+    const content = data.choices[0].message.content.trim();
+
+    const jsonMatch = content.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) {
+      console.warn('⚠️ Could not parse phrases JSON from LLM response');
+      return [];
+    }
+
+    const phrases = JSON.parse(jsonMatch[0]);
+    const validPhrases = phrases.filter(p => typeof p === 'string' && p.trim().length > 3);
+
+    // Post-extraction validation: verify each number in a phrase actually exists in the OCR text
+    // This catches hallucinated values (e.g. LLM writes "1,200" but OCR text has "500")
+    // Allows comma/no-comma variants: "99,500" matches "99500" and vice versa
+    const verifiedPhrases = validPhrases.filter(phrase => {
+      const numbersInPhrase = phrase.match(/[\d,]+/g);
+      if (!numbersInPhrase) return true; // No number — text-only phrase, keep it
+      return numbersInPhrase.every(num => {
+        // Try exact match first
+        if (ocrText.includes(num)) return true;
+        // Try without commas (OCR may drop thousands separator)
+        const numNoComma = num.replace(/,/g, '');
+        if (ocrText.includes(numNoComma)) return true;
+        // Try with commas inserted (OCR may have number, phrase has comma)
+        const numWithComma = numNoComma.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return ocrText.includes(numWithComma);
+      });
+    });
+
+    const droppedCount = validPhrases.length - verifiedPhrases.length;
+    if (droppedCount > 0) {
+      console.warn(`⚠️ Dropped ${droppedCount} phrases with hallucinated numbers not found in OCR text`);
+      const dropped = validPhrases.filter(p => !verifiedPhrases.includes(p));
+      dropped.forEach(p => console.warn(`   ❌ Hallucinated: "${p}"`));
+    }
+
+    console.log(`📌 Extracted ${verifiedPhrases.length} verified key phrases`);
+    verifiedPhrases.forEach(p => console.log(`   ✅ "${p}"`));
+    return verifiedPhrases;
+  } catch (error) {
+    console.warn(`⚠️ Phrase extraction failed: ${error.message}, skipping`);
+    return [];
+  }
+}
+
+// Store extracted phrases as individual focused mini-chunk documents
+async function storePhraseChunks(userId, fileName, phrases, policyName, fileMetadata) {
+  const storedIds = [];
+  for (const phrase of phrases) {
+    try {
+      const phraseEmbedding = await embeddingService.generateEmbedding(phrase);
+      const phraseDocId = await mongoService.storeUserDocument(
+        userId,
+        `[phrase] ${fileName}`,
+        phrase,
+        phraseEmbedding,
+        {
+          ...fileMetadata,
+          policyName,
+          chunkType: 'key_phrase',
+          parentFile: fileName
+        }
+      );
+      storedIds.push(phraseDocId);
+    } catch (phraseError) {
+      console.warn(`⚠️ Failed to store phrase "${phrase.substring(0, 50)}": ${phraseError.message}`);
+    }
+  }
+  console.log(`✅ Stored ${storedIds.length}/${phrases.length} phrase chunks for "${fileName}"`);
+  return storedIds;
+}
+
 // OCR function using OpenTyphoon API
 async function extractTextFromFile(filePath, fileName) {
   const apiKey = process.env.TYPHOON_API_KEY;
@@ -502,7 +633,20 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     // Step 2: Generate embeddings
     console.log('🔄 Generating embeddings...');
     const embedding = await embeddingService.generateEmbedding(extractedText);
-    
+
+    // Step 2.5: Extract key phrases and store as focused mini-chunks
+    console.log('📌 Extracting key insurance phrases for focused retrieval...');
+    const phrases = await extractInsurancePhrases(extractedText);
+    if (phrases.length > 0) {
+      await storePhraseChunks(userId, fileName, phrases, policyName, {
+        originalName: fileName,
+        mimeType: req.file.mimetype,
+        size: req.file.size,
+        uploadedAt: new Date(),
+        source: 'user_upload'
+      });
+    }
+
     // Step 3: Store in MongoDB user_documents collection (NOT thai_insurance_docs)
     console.log('💾 Storing in user_documents collection...');
     const documentId = await mongoService.storeUserDocument(
@@ -641,39 +785,6 @@ app.delete('/api/user/documents/:documentId', async (req, res) => {
   }
 });
 
-app.delete('/api/user/documents', async (req, res) => {
-  try {
-    const { userId, documentIds } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'User ID is required' });
-    }
-    if (!Array.isArray(documentIds) || documentIds.length === 0) {
-      return res.status(400).json({ success: false, error: 'documentIds array is required' });
-    }
-
-    console.log(`🗑️ Bulk deleting ${documentIds.length} documents for user ${userId}`);
-
-    let deleted = 0;
-    let failed = 0;
-    for (const documentId of documentIds) {
-      try {
-        const result = await mongoService.deleteUserDocument(documentId, userId);
-        if (result.success) deleted++;
-        else failed++;
-      } catch {
-        failed++;
-      }
-    }
-
-    console.log(`✅ Bulk delete done: ${deleted} deleted, ${failed} failed`);
-    res.json({ success: true, deleted, failed });
-  } catch (error) {
-    console.error('Error bulk deleting documents:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // Update document policy name
 app.patch('/api/user/documents/:documentId/policy', async (req, res) => {
   try {
@@ -719,6 +830,41 @@ app.patch('/api/user/documents/:documentId/policy', async (req, res) => {
   }
 });
 
+// Bulk delete multiple user documents
+app.delete('/api/user/documents', async (req, res) => {
+  try {
+    const { userId, documentIds } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID is required' });
+    }
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'documentIds array is required' });
+    }
+
+    console.log(`🗑️ Bulk deleting ${documentIds.length} documents for user ${userId}`);
+
+    let deleted = 0;
+    let failed = 0;
+    for (const documentId of documentIds) {
+      try {
+        const result = await mongoService.deleteUserDocument(documentId, userId);
+        if (result.success) deleted++;
+        else failed++;
+      } catch {
+        failed++;
+      }
+    }
+
+    console.log(`✅ Bulk delete done: ${deleted} deleted, ${failed} failed`);
+    res.json({ success: true, deleted, failed });
+  } catch (error) {
+    console.error('Error bulk deleting documents:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Bulk update policy name for multiple user documents
 app.patch('/api/user/documents/bulk-policy', async (req, res) => {
   try {
     const { userId, documentIds, policyName } = req.body;
@@ -833,6 +979,18 @@ app.post('/api/upload/batch', upload.array('files', 10), async (req, res) => {
 
         // Step 2: Embedding
         const embedding = await embeddingService.generateEmbedding(extractedText);
+
+        // Step 2.5: Extract key phrases and store as focused mini-chunks
+        const phrases = await extractInsurancePhrases(extractedText);
+        if (phrases.length > 0) {
+          await storePhraseChunks(userId, fileName, phrases, policyName, {
+            originalName: fileName,
+            mimeType: file.mimetype,
+            size: file.size,
+            uploadedAt: new Date(),
+            source: 'user_upload'
+          });
+        }
 
         // Step 3: Store
         const documentId = await mongoService.storeUserDocument(

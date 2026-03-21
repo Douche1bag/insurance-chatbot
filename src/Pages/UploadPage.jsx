@@ -43,7 +43,7 @@ export default function UploadPage({ user, onNavigate }) {
   const removeFile = (index) => {
     setFiles(prev => prev.filter((_, i) => i !== index));
     setUploadResults(prev => prev.filter((_, i) => i !== index));
-  };x
+  };
 
   const uploadSingleFile = async (file) => {
     const formData = new FormData();
