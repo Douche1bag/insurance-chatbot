@@ -8,9 +8,9 @@ import { MessageSquare, CheckCircle2 } from 'lucide-react';
 
 export default function UploadPage({ user, onNavigate }) {
   const [uploading, setUploading] = useState(false);
-  const [files, setFiles] = useState([]); // Changed to array
+  const [files, setFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
-  const [uploadResults, setUploadResults] = useState([]); // Track each file result
+  const [uploadResults, setUploadResults] = useState([]);
   const [showNextModal, setShowNextModal] = useState(false);
   const inputRef = useRef();
 
@@ -35,8 +35,7 @@ export default function UploadPage({ user, onNavigate }) {
 
   const handleChange = (e) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files);
-      setFiles(prev => [...prev, ...newFiles]);
+      setFiles(prev => [...prev, ...Array.from(e.target.files)]);
     }
   };
 
@@ -49,93 +48,74 @@ export default function UploadPage({ user, onNavigate }) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('userId', user?.id || 'guest');
-
-    const response = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData
-    });
-
-    const result = await response.json();
-    return result;
+    const response = await fetch('/api/upload', { method: 'POST', body: formData });
+    return response.json();
   };
 
   const startUpload = async () => {
-    if (files.length === 0) {
-      alert('กรุณาเลือกไฟล์อย่างน้อย 1 ไฟล์');
-      return;
-    }
-
+    if (files.length === 0) { alert('กรุณาเลือกไฟล์อย่างน้อย 1 ไฟล์'); return; }
     setUploading(true);
-    setUploadResults([]);
+    setUploadResults(files.map(f => ({ name: f.name, status: 'pending', message: '', ocrMethod: null })));
 
-    // Initialize all files as pending
-    const initialResults = files.map(f => ({
-      name: f.name,
-      status: 'pending', // pending | uploading | success | error
-      message: ''
-    }));
-    setUploadResults(initialResults);
-
-    // Upload files one by one (sequential to avoid overloading the server)
     let successCountLocal = 0;
     for (let i = 0; i < files.length; i++) {
-      // Mark current file as uploading
-      setUploadResults(prev =>
-        prev.map((r, idx) => idx === i ? { ...r, status: 'uploading' } : r)
-      );
-
+      setUploadResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'uploading' } : r));
       try {
         const result = await uploadSingleFile(files[i]);
-
         if (result.success) {
           successCountLocal++;
-          setUploadResults(prev =>
-            prev.map((r, idx) => idx === i ? {
-              ...r,
-              status: 'success',
-              message: `✅ ${result.data.textLength} ตัวอักษร | ${result.data.embeddingDimensions} มิติ`
-            } : r)
-          );
+          setUploadResults(prev => prev.map((r, idx) => idx === i ? {
+            ...r,
+            status: 'success',
+            ocrMethod: result.data.ocrMethod || 'unknown',
+            message: `${result.data.textLength} ตัวอักษร`
+          } : r));
         } else {
-          setUploadResults(prev =>
-            prev.map((r, idx) => idx === i ? {
-              ...r,
-              status: 'error',
-              message: result.error || 'Upload failed'
-            } : r)
-          );
+          setUploadResults(prev => prev.map((r, idx) => idx === i ? {
+            ...r, status: 'error', message: result.error || 'Upload failed'
+          } : r));
         }
       } catch (err) {
-        setUploadResults(prev =>
-          prev.map((r, idx) => idx === i ? {
-            ...r,
-            status: 'error',
-            message: err.message
-          } : r)
-        );
+        setUploadResults(prev => prev.map((r, idx) => idx === i ? {
+          ...r, status: 'error', message: err.message
+        } : r));
       }
     }
 
     setUploading(false);
-    if (successCountLocal > 0) {
-      setShowNextModal(true);
-    }
+    if (successCountLocal > 0) setShowNextModal(true);
   };
 
-  const clearAll = () => {
-    setFiles([]);
-    setUploadResults([]);
-  };
+  const clearAll = () => { setFiles([]); setUploadResults([]); };
 
   const successCount = uploadResults.filter(r => r.status === 'success').length;
-  const errorCount = uploadResults.filter(r => r.status === 'error').length;
+  const errorCount   = uploadResults.filter(r => r.status === 'error').length;
+
+  // OCR method badge
+  const OcrBadge = ({ method }) => {
+    if (!method) return null;
+    if (method === 'typhoon-ocr') return (
+      <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded px-1.5 py-0.5 shrink-0">
+        🤖 Typhoon OCR
+      </span>
+    );
+    if (method === 'tesseract') return (
+      <span className="text-xs bg-orange-50 text-orange-600 border border-orange-200 rounded px-1.5 py-0.5 shrink-0">
+        ⚠️ Tesseract (คุณภาพต่ำ)
+      </span>
+    );
+    return (
+      <span className="text-xs bg-slate-100 text-slate-500 rounded px-1.5 py-0.5 shrink-0">
+        {method}
+      </span>
+    );
+  };
 
   return (
     <>
     <div className="flex flex-col items-center min-h-[60vh] bg-slate-50 relative">
       <ChatHeader />
       <div className="w-full flex flex-col items-center mt-4 relative">
-        <div className="absolute left-1/2 -translate-x-1/2 -top-9 w-6 h-6 z-30 bg-slate-50"></div>
         <h2 className="text-xl font-bold mb-1">นำเข้ากรมธรรม์ใหม่</h2>
         <div className="text-slate-500 mb-6 text-base">
           รองรับไฟล์ PDF, JPG, PNG — อัปโหลดได้หลายไฟล์พร้อมกัน
@@ -157,7 +137,7 @@ export default function UploadPage({ user, onNavigate }) {
               type="file"
               className="hidden"
               accept=".pdf,.jpg,.jpeg,.png"
-              multiple // Allow multiple files
+              multiple
               onChange={handleChange}
               disabled={uploading}
             />
@@ -190,17 +170,16 @@ export default function UploadPage({ user, onNavigate }) {
                   const result = uploadResults[index];
                   const statusIcon = !result ? '📄'
                     : result.status === 'uploading' ? '⏳'
-                    : result.status === 'success' ? '✅'
-                    : result.status === 'error' ? '❌'
+                    : result.status === 'success'   ? '✅'
+                    : result.status === 'error'     ? '❌'
                     : '📄';
-
                   const statusColor = !result ? 'text-slate-500'
                     : result.status === 'success' ? 'text-green-600'
-                    : result.status === 'error' ? 'text-red-500'
+                    : result.status === 'error'   ? 'text-red-500'
                     : 'text-blue-500';
 
                   return (
-                    <li key={index} className="flex items-center justify-between px-4 py-2 text-sm">
+                    <li key={index} className="flex items-center justify-between px-4 py-2.5 text-sm gap-2">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
                         <span>{statusIcon}</span>
                         <span className="truncate text-slate-700">{file.name}</span>
@@ -208,15 +187,20 @@ export default function UploadPage({ user, onNavigate }) {
                           ({(file.size / 1024).toFixed(0)} KB)
                         </span>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <div className="flex items-center gap-2 shrink-0 ml-1">
+                        {/* OCR method badge — shown after success */}
+                        {result?.status === 'success' && (
+                          <OcrBadge method={result.ocrMethod} />
+                        )}
                         {result?.message && (
                           <span className={`text-xs ${statusColor}`}>{result.message}</span>
                         )}
+                        {/* Re-upload hint for Tesseract files */}
+                        {result?.ocrMethod === 'tesseract' && (
+                          <span className="text-xs text-orange-500 hidden sm:inline">— อัปโหลดใหม่เมื่อ Typhoon พร้อม</span>
+                        )}
                         {!uploading && (
-                          <button
-                            onClick={() => removeFile(index)}
-                            className="text-slate-400 hover:text-red-500 ml-1"
-                          >
+                          <button onClick={() => removeFile(index)} className="text-slate-400 hover:text-red-500 ml-1">
                             ✕
                           </button>
                         )}
@@ -228,9 +212,9 @@ export default function UploadPage({ user, onNavigate }) {
             </div>
           )}
 
-          {/* Summary after upload */}
+          {/* Summary */}
           {uploadResults.length > 0 && !uploading && (
-            <div className="w-[90vw] max-w-2xl mt-3 flex gap-3 text-sm">
+            <div className="w-[90vw] max-w-2xl mt-3 flex flex-wrap gap-2 text-sm">
               {successCount > 0 && (
                 <span className="bg-green-50 text-green-700 border border-green-200 rounded-lg px-3 py-1">
                   ✅ สำเร็จ {successCount} ไฟล์
@@ -239,6 +223,11 @@ export default function UploadPage({ user, onNavigate }) {
               {errorCount > 0 && (
                 <span className="bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-1">
                   ❌ ผิดพลาด {errorCount} ไฟล์
+                </span>
+              )}
+              {uploadResults.some(r => r.ocrMethod === 'tesseract') && (
+                <span className="bg-orange-50 text-orange-700 border border-orange-200 rounded-lg px-3 py-1">
+                  ⚠️ บางไฟล์ใช้ Tesseract — คุณภาพต่ำ กรุณาอัปโหลดใหม่เมื่อ Typhoon พร้อม
                 </span>
               )}
             </div>
@@ -250,9 +239,7 @@ export default function UploadPage({ user, onNavigate }) {
             disabled={uploading || files.length === 0}
             className="w-48 mt-6"
           >
-            {uploading
-              ? `กำลังอัปโหลด...`
-              : `Scan ${files.length > 1 ? `${files.length} ไฟล์` : 'Document'}`}
+            {uploading ? 'กำลังอัปโหลด...' : `Scan ${files.length > 1 ? `${files.length} ไฟล์` : 'Document'}`}
           </Button>
         </form>
 
@@ -280,34 +267,34 @@ export default function UploadPage({ user, onNavigate }) {
       </div>
     </div>
 
-      {showNextModal && (
-        <div className="fixed inset-0 left-56 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm mx-4 flex flex-col items-center gap-4">
-            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50">
-              <CheckCircle2 size={32} className="text-green-500" />
-            </div>
+    {showNextModal && (
+      <div className="fixed inset-0 left-56 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-sm mx-4 flex flex-col items-center gap-4">
+          <div className="flex items-center justify-center w-14 h-14 rounded-full bg-green-50">
+            <CheckCircle2 size={32} className="text-green-500" />
+          </div>
           <h2 className="text-lg font-semibold text-slate-800">อัปโหลดเสร็จสมบูรณ์!</h2>
-            <p className="text-sm text-slate-500 text-center">
-              คุณต้องการไปที่ AI Chat เพื่อเริ่มถามคำถามเกี่ยวกับนโยบายประกันภัยของคุณเลยมั้ย?
-            </p>
-            <div className="flex gap-3 w-full mt-2">
-              <button
-                className="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 font-medium text-sm"
-                onClick={() => setShowNextModal(false)}
-              >
-                ไม่ต้องการ
-              </button>
-              <button
-                className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium text-sm flex items-center justify-center gap-2"
-                onClick={() => { setShowNextModal(false); onNavigate('chat'); }}
-              >
-                <MessageSquare size={15} />
-                ไปที่ AI Chat
-              </button>
-            </div>
+          <p className="text-sm text-slate-500 text-center">
+            คุณต้องการไปที่ AI Chat เพื่อเริ่มถามคำถามเกี่ยวกับนโยบายประกันภัยของคุณเลยมั้ย?
+          </p>
+          <div className="flex gap-3 w-full mt-2">
+            <button
+              className="flex-1 px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 font-medium text-sm"
+              onClick={() => setShowNextModal(false)}
+            >
+              ไม่ต้องการ
+            </button>
+            <button
+              className="flex-1 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium text-sm flex items-center justify-center gap-2"
+              onClick={() => { setShowNextModal(false); onNavigate('chat'); }}
+            >
+              <MessageSquare size={15} />
+              ไปที่ AI Chat
+            </button>
           </div>
         </div>
-      )}
+      </div>
+    )}
     </>
   );
 }
