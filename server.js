@@ -6,6 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import FormData from 'form-data';
 import fetch from 'node-fetch';
 import mongoService from './src/services/mongoService.js';
 import embeddingService from './src/services/embeddingService.js';
@@ -103,12 +104,15 @@ app.post('/api/chat', async (req, res) => {
       recentMessages
     });
 
+    // ✅ Send response immediately — don't make user wait for chat save
     res.json(result);
 
+    // Save chat history in background (fire-and-forget)
     if (result.success && userId && conversationId) {
       (async () => {
         try {
           const embSvc = (await import('./src/services/embeddingService.js')).default;
+          // Use hash embedding — no API call needed, saves 2 API calls per message
           const messageEmbedding  = embSvc.generateSimpleEmbedding(query);
           const responseEmbedding = embSvc.generateSimpleEmbedding(result.response);
           await mongoService.addMessageToConversation(conversationId, userId, {
@@ -248,13 +252,18 @@ app.get('/api/documents/user/:userId', async (req, res) => {
 
 function cleanTesseractText(text) {
   let t = text;
+
+  // ── 1. Fix sara am (the most common Tesseract Thai error) ────────────────
   t = t.replace(/ํา/g, 'ำ');
   t = t.replace(/ํี/g, 'ี');
   t = t.replace(/ํ/g, '');
 
+  // ── 2. Fix common Thai word errors in insurance documents ────────────────
+  // sara am words
   const saraAmFixes = ['ชำ','จำ','ทำ','กำ','นำ','คำ','สำ','ยำ','ดำ','ขำ','ลำ','งำ','บำ','ซำ','รำ','ผำ','ถำ','วำ','พำ','ภำ','มำ','ฟำ','ฝำ','ฮำ'];
   saraAmFixes.forEach(w => { t = t.replace(new RegExp(w.replace('ำ','ํา'), 'g'), w); });
 
+  // Insurance-specific word fixes
   const wordFixes = [
     [/เบีย(?!ร)/g,        'เบี้ย'],
     [/เบื้ย/g,            'เบี้ย'],
@@ -271,18 +280,21 @@ function cleanTesseractText(text) {
     [/จ่วย/g,             'จ่าย'],
     [/ตั๋า/g,             'ต่ำ'],
     [/15ี/g,              '15 ปี'],
-    [/(\d+)ี/g,           '$1 ปี'],
-    [/(\d+)ป(?!ี)/g,      '$1 ปี'],
+    [/(\d+)ี/g,           '$1 ปี'],    // any number followed by stray ี
+    [/(\d+)ป(?!ี)/g,      '$1 ปี'],    // number + ป without ี
     [/ซํา/g,              'ซ้ำ'],
-    [/ชำจะ/g,             'ชำระ'],
+    [/ชำจะ/g,             'ชำระ'],     // ชำจะ → ชำระ
     [/ซำระ/g,             'ชำระ'],
     [/แจพาะ/g,            'เฉพาะ'],
     [/บันผล/g,            'ปันผล'],
     [/คร้งละ/g,           'ครั้งละ'],
     [/ดำชดเชย/g,          'ค่าชดเชย'],
+    [/ทุพพลภาพ/g,         'ทุพพลภาพ'],  // already correct, keep
   ];
   wordFixes.forEach(([re, fix]) => { t = t.replace(re, fix); });
 
+  // ── 3. Remove obvious garbage ────────────────────────────────────────────
+  // Remove lines that have very few Thai/number characters (mostly garbage)
   const cleanedLines = [];
   for (const line of t.split('\n')) {
     const thaiCount = (line.match(/[\u0E00-\u0E7F]/g) || []).length;
@@ -293,8 +305,11 @@ function cleanTesseractText(text) {
     }
   }
   t = cleanedLines.join('\n');
+  // Remove stray short latin words and symbols
   t = t.replace(/\b[a-zA-Z]{1,2}\b/g, ' ');
   t = t.replace(/[\u00A2\u00A3\u00A5\u00A9\u00AE\u00B0]/g, ' ');
+
+  // ── 4. Fix spacing and formatting ────────────────────────────────────────
   t = t.replace(/[ \t]{2,}/g, ' ');
   t = t.replace(/\n{3,}/g, '\n\n');
   t = t.replace(/^[ \t]+/gm, '');
@@ -306,7 +321,7 @@ function cleanTesseractText(text) {
 async function extractWithTesseract(filePath) {
   console.log('🔄 Falling back to Tesseract OCR...');
   const worker = await createWorker(['tha', 'eng'], 1, {
-    logger: () => {}
+    logger: () => {} // suppress progress logs
   });
   try {
     const { data: { text } } = await worker.recognize(filePath);
@@ -321,118 +336,190 @@ async function extractWithTesseract(filePath) {
   }
 }
 
-// ===== OCR (vLLM vision format) =====
+// ===== OCR EXTRACTION (Typhoon → vLLM → Tesseract) =====
 
 async function extractTextFromFile(filePath, fileName) {
-  const runpodUrl = process.env.RUNPOD_OCR_URL;
-  if (!runpodUrl) throw new Error('RUNPOD_OCR_URL not found in environment variables');
-
-  const url = `${runpodUrl}/v1/chat/completions`;
-  const maxRetries = 4;
-
-  // อ่านไฟล์เป็น base64
   const fileBuffer = fs.readFileSync(filePath);
   const base64Image = fileBuffer.toString('base64');
   const ext = fileName.split('.').pop().toLowerCase();
   const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`🔍 OCR attempt ${attempt}/${maxRetries} for ${fileName}`);
+  // ── 1. TRY TYPHOON API FIRST (4 retries) ───────────────────────────────
+  const apiKey = process.env.TYPHOON_API_KEY;
+  if (apiKey) {
+    const typhoonUrl = 'https://api.opentyphoon.ai/v1/ocr';
+    const maxRetries = 2;
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer dummy'
-        },
-        body: JSON.stringify({
-          model: 'typhoon-ai/typhoon-ocr1.5-2b',
-          max_tokens: 16384,
-          temperature: 0.1,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:${mimeType};base64,${base64Image}`
-                  }
-                },
-                {
-                  type: 'text',
-                  text: 'Please extract all text from this insurance document. Return the complete text content including all tables, numbers, and details.'
-                }
-              ]
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔍 Typhoon OCR attempt ${attempt}/${maxRetries}`);
+
+        const formData = new FormData();
+        formData.append('file', fs.createReadStream(filePath));
+        formData.append('model', 'typhoon-ocr');
+        formData.append('task_type', 'default');
+        formData.append('max_tokens', '16384');
+        formData.append('temperature', '0.1');
+
+        const response = await fetch(typhoonUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            ...formData.getHeaders()
+          },
+          body: formData
+        });
+
+        // Retry on server error
+        if (response.status >= 500) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        if (response.status !== 200) {
+          const errText = await response.text();
+          throw new Error(errText);
+        }
+
+        const result = await response.json();
+
+        const extractedTexts = [];
+        for (const pageResult of result.results || []) {
+          if (pageResult.success && pageResult.message) {
+            const content = pageResult.message.choices[0].message.content;
+            try {
+              const parsed = JSON.parse(content);
+              extractedTexts.push(parsed.natural_text || content);
+            } catch {
+              extractedTexts.push(content);
             }
-          ]
-        })
-      });
+          }
+        }
 
-      // HTTP 5xx → retry
-      if (response.status >= 500) {
+        const fullText = extractedTexts.join('\n\n');
+
+        if (!fullText || fullText.trim().length === 0) {
+          throw new Error('Empty OCR result');
+        }
+
+        console.log(`✅ Typhoon success (${fullText.length} chars)`);
+        return { text: fullText, method: 'typhoon-ocr' };
+
+      } catch (error) {
+        console.log(`⚠️ Typhoon attempt ${attempt} failed:`, error.message);
+
         if (attempt < maxRetries) {
           const wait = attempt * 4000;
-          console.log(`⚠️ OCR HTTP ${response.status} — retrying in ${wait/1000}s (attempt ${attempt}/${maxRetries})`);
           await new Promise(r => setTimeout(r, wait));
-          continue;
         }
-        throw new Error(`OCR API error (${response.status})`);
       }
-
-      if (response.status !== 200) {
-        const errText = await response.text();
-        throw new Error(`OCR API error (${response.status}): ${errText.substring(0, 200)}`);
-      }
-
-      const result = await response.json();
-      const fullText = result.choices?.[0]?.message?.content || '';
-
-      if (!fullText || fullText.trim().length === 0) {
-        if (attempt < maxRetries) {
-          console.log(`⚠️ No text extracted — retrying (attempt ${attempt}/${maxRetries})`);
-          await new Promise(r => setTimeout(r, attempt * 4000));
-          continue;
-        }
-        break;
-      }
-
-      if (attempt > 1) console.log(`✅ OCR succeeded on attempt ${attempt}`);
-      console.log(`📝 Extracted ${fullText.length} characters from ${fileName}`);
-      return { text: fullText, method: 'typhoon-ocr' };
-
-    } catch (error) {
-      const isRetryable = error.message.includes('502') || error.message.includes('503') ||
-                          error.message.includes('Bad Gateway') ||
-                          error.message.includes('ECONNRESET') || error.message.includes('ETIMEDOUT');
-      if (isRetryable && attempt < maxRetries) {
-        const wait = attempt * 4000;
-        console.log(`OCR error — retrying in ${wait/1000}s (attempt ${attempt}/${maxRetries})`);
-        await new Promise(r => setTimeout(r, wait));
-        continue;
-      }
-      break;
     }
+
+    console.log('⚠️ Typhoon API failed — switching to vLLM...');
+  } else {
+    console.log('⚠️ TYPHOON_API_KEY not found — switching to vLLM...');
   }
 
-  // Fallback to Tesseract
-  console.log('Typhoon OCR failed — attempting Tesseract fallback');
+  // ── 2. FALLBACK → vLLM (4 retries) ────────────────────────────────────
+  const vllmUrl = process.env.RUNPOD_OCR_URL;
+  if (vllmUrl) {
+    const url = `${vllmUrl}/v1/chat/completions`;
+    const maxRetries = 2;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🤖 vLLM attempt ${attempt}/${maxRetries}`);
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000);
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer dummy'
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: 'typhoon-ai/typhoon-ocr1.5-2b',
+            max_tokens: 16384,
+            temperature: 0.1,
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:${mimeType};base64,${base64Image}`
+                    }
+                  },
+                  {
+                    type: 'text',
+                    text: 'Please extract all text from this insurance document. Return the complete text content including all tables, numbers, and details.'
+                  }
+                ]
+              }
+            ]
+          })
+        });
+
+        clearTimeout(timeout);
+
+        // Retry on server error
+        if (response.status >= 500) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        if (response.status !== 200) {
+          const errText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errText.substring(0, 200)}`);
+        }
+
+        const result = await response.json();
+        const text = result.choices?.[0]?.message?.content || '';
+
+        if (!text || text.trim().length < 10) {
+          throw new Error('Empty OCR result');
+        }
+
+        console.log(`✅ vLLM success (${text.length} chars)`);
+        return { text, method: 'vllm-ocr' };
+
+      } catch (error) {
+        console.log(`⚠️ vLLM attempt ${attempt} failed:`, error.message);
+
+        if (attempt < maxRetries) {
+          const wait = attempt * 3000;
+          await new Promise(r => setTimeout(r, wait));
+        }
+      }
+    }
+
+    console.log('⚠️ vLLM failed — falling back to Tesseract...');
+  } else {
+    console.log('⚠️ RUNPOD_OCR_URL not set — falling back to Tesseract...');
+  }
+
+  // ── 3. FINAL FALLBACK → TESSERACT ─────────────────────────────────────
   const tesseractText = await extractWithTesseract(filePath);
   const cleaned = cleanTesseractText(tesseractText);
 
+  // Detect bad table OCR
   const lines = cleaned.split('\n').filter(l => l.trim());
   const numericLines = lines.filter(l => (l.match(/\d/g) || []).length > l.length * 0.3);
   const isLikelyTable = numericLines.length / Math.max(lines.length, 1) > 0.4;
 
   if (isLikelyTable) {
     throw new Error(
-      'OCR ล้มเหลว: เอกสารนี้ดูเหมือนตารางตัวเลข ซึ่ง Tesseract อ่านไม่ถูกต้อง\n' +
-      'กรุณารอให้ Typhoon OCR กลับมาใช้งานได้ แล้วลองอัปโหลดใหม่อีกครั้ง'
+      'OCR ล้มเหลว: เอกสารนี้เป็นตารางตัวเลข ซึ่ง Tesseract อ่านไม่แม่น\n' +
+      'กรุณาลองใหม่ภายหลัง'
     );
   }
 
-  return { text: '[Using tesseract — Typhoon ขัดข้อง ข้อความอาจคลาดเคลื่อน]\n\n' + cleaned, method: 'tesseract' };
+  return {
+    text: '[⚠️ Using Tesseract fallback — Typhoon and vLLM unavailable]\n\n' + cleaned,
+    method: 'tesseract'
+  };
 }
 
 // ===== UPLOAD =====
@@ -450,7 +537,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 
     console.log('🔍 Extracting text with OCR...');
     const { text: extractedText, method: ocrMethod } = await extractTextFromFile(filePath, fileName);
-    console.log(` OCR method used: ${ocrMethod}`);
+    console.log(`🤖 OCR method used: ${ocrMethod}`);
 
     console.log('🔄 Generating embeddings...');
     const embedding = await embeddingService.generateEmbedding(extractedText);
