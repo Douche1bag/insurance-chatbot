@@ -96,7 +96,7 @@ export default function UploadPage({ user, onNavigate }) {
     if (!method) return null;
     if (method === 'typhoon-ocr') return (
       <span className="text-xs bg-blue-50 text-blue-600 border border-blue-200 rounded px-1.5 py-0.5 shrink-0">
-        🤖 Typhoon OCR
+        Typhoon OCR
       </span>
     );
     if (method === 'tesseract') return (
