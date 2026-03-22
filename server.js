@@ -342,14 +342,14 @@ async function extractTextFromFile(filePath, fileName) {
   const apiKey = process.env.TYPHOON_API_KEY;
   if (!apiKey) throw new Error('TYPHOON_API_KEY not found in environment variables');
 
-  const url = 'https://api.opentyphoon.ai/v1/ocr';
+  const url = `${process.env.RUNPOD_OCR_URL}/v1/ocr`;
   const maxRetries = 4;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const formData = new FormData();
       formData.append('file', fs.createReadStream(filePath));
-      formData.append('model', 'typhoon-ocr');
+      formData.append('model', 'typhoon-ai/typhoon-ocr1.5-2b');
       formData.append('task_type', 'default');
       formData.append('max_tokens', '16384');
       formData.append('temperature', '0.1');
@@ -358,7 +358,7 @@ async function extractTextFromFile(filePath, fileName) {
 
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, ...formData.getHeaders() },
+        headers: { 'Authorization': 'Bearer dummy', ...formData.getHeaders() },
         body: formData
       });
 
