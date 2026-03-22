@@ -641,6 +641,39 @@ app.delete('/api/user/documents/:documentId', async (req, res) => {
   }
 });
 
+app.delete('/api/user/documents', async (req, res) => {
+  try {
+    const { userId, documentIds } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID is required' });
+    }
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'documentIds array is required' });
+    }
+
+    console.log(`🗑️ Bulk deleting ${documentIds.length} documents for user ${userId}`);
+
+    let deleted = 0;
+    let failed = 0;
+    for (const documentId of documentIds) {
+      try {
+        const result = await mongoService.deleteUserDocument(documentId, userId);
+        if (result.success) deleted++;
+        else failed++;
+      } catch {
+        failed++;
+      }
+    }
+
+    console.log(`✅ Bulk delete done: ${deleted} deleted, ${failed} failed`);
+    res.json({ success: true, deleted, failed });
+  } catch (error) {
+    console.error('Error bulk deleting documents:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Update document policy name
 app.patch('/api/user/documents/:documentId/policy', async (req, res) => {
   try {
@@ -682,6 +715,42 @@ app.patch('/api/user/documents/:documentId/policy', async (req, res) => {
     }
   } catch (error) {
     console.error('Error updating policy name:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.patch('/api/user/documents/bulk-policy', async (req, res) => {
+  try {
+    const { userId, documentIds, policyName } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'User ID is required' });
+    }
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      return res.status(400).json({ success: false, error: 'documentIds array is required' });
+    }
+    if (!policyName) {
+      return res.status(400).json({ success: false, error: 'policyName is required' });
+    }
+
+    console.log(`✏️ Bulk updating policy name to "${policyName}" for ${documentIds.length} documents`);
+
+    let updated = 0;
+    let failed = 0;
+    for (const documentId of documentIds) {
+      try {
+        const result = await mongoService.updateDocumentPolicy(documentId, userId, policyName);
+        if (result.success) updated++;
+        else failed++;
+      } catch {
+        failed++;
+      }
+    }
+
+    console.log(`✅ Bulk update done: ${updated} updated, ${failed} failed`);
+    res.json({ success: true, updated, failed });
+  } catch (error) {
+    console.error('Error bulk updating policy name:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
